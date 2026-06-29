@@ -7,7 +7,7 @@ license = "Insert License Here"
 modId = "linglens"
 version = "${version}"
 displayName = "LingLens"
-authors = "Me!"
+authors = "lin-lin-miao"
 description = '''
 This is an example description! Tell everyone what your mod is about!
 '''

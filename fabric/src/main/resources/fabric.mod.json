@@ -5,21 +5,21 @@
   "name": "LingLens",
   "description": "This is an example description! Tell everyone what your mod is about!",
   "authors": [
-    "Me!"
+    "lin-lin-miao"
   ],
   "contact": {
-    "homepage": "https://fabricmc.net/",
-    "sources": "https://github.com/FabricMC/fabric-example-mod"
+    "homepage": "https://lh.linglinmiao.fun/",
+    "sources": "https://github.com/lin-lin-miao/LingLens-MCmod"
   },
   "license": "CC0-1.0",
   "icon": "assets/linglens/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
-      "com.linglens.fabric.ExampleModFabric"
+      "com.linglens.fabric.LingLensModMainFabric"
     ],
     "client": [
-      "com.linglens.fabric.client.ExampleModFabricClient"
+      "com.linglens.fabric.client.LingLensFabricClient"
     ]
   },
   "mixins": [
