@@ -1,17 +1,32 @@
 package com.linglens.fabric;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 
 import com.linglens.LingLensModMain;
+import com.linglens.command.ModCommands;
+import com.linglens.manager.TeleportManager;
 
 public final class LingLensModMainFabric implements ModInitializer {
     @Override
     public void onInitialize() {
-        // This code runs as soon as Minecraft is in a mod-load-ready state.
-        // However, some things (like resources) may still be uninitialized.
-        // Proceed with mild caution.
-
         // Run our common setup.
         LingLensModMain.init();
+
+        // 服务器启动时：加载待传送数据
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            TeleportManager.loadFromFile();
+        });
+
+        // 服务器停止时：保存待传送数据
+        ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
+            TeleportManager.saveToFile();
+        });
+
+        // 注册命令
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            ModCommands.register(dispatcher);
+        });
     }
 }
