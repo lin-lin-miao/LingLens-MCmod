@@ -5,6 +5,8 @@ description: Comprehensive Minecraft Server Management Module Development Guide
 正在使用VSC进行开发，编译步骤留给用户，项目位置`E:\mcmod\LingLens`。
 目前正在编写`minecraft_version = 1.20.1`
 
+在关键代码、主要函数上加入注释
+
 项目名称:LingLens - 灵棱枢
 
 综合Minecraft服务器管理模组开发指南

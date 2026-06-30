@@ -40,33 +40,32 @@ public class ModCommands {
                                 .requires(src -> src.hasPermission(4))
                                 .then(Commands.argument("player", StringArgumentType.word())
                                         .suggests(PLAYER_SUGGESTIONS)
-                                        .executes(ctx -> handleOfflineTp(ctx, null, Level.OVERWORLD.location().toString()))
+                                        .executes(ctx -> handleOfflineTp(ctx, null,
+                                                Level.OVERWORLD.location().toString()))
                                         .then(Commands.argument("location", Vec3Argument.vec3())
                                                 .executes(ctx -> {
                                                     Vec3 pos = Vec3Argument.getVec3(ctx, "location");
-                                                    return handleOfflineTp(ctx, pos, Level.OVERWORLD.location().toString());
+                                                    return handleOfflineTp(ctx, pos,
+                                                            Level.OVERWORLD.location().toString());
                                                 })
                                                 .then(Commands.literal("in")
-                                                        .then(Commands.argument("dimension", DimensionArgument.dimension())
+                                                        .then(Commands
+                                                                .argument("dimension", DimensionArgument.dimension())
                                                                 .executes(ctx -> {
                                                                     Vec3 pos = Vec3Argument.getVec3(ctx, "location");
-                                                                    ResourceLocation dimId = DimensionArgument.getDimension(ctx, "dimension").dimension().location();
+                                                                    ResourceLocation dimId = DimensionArgument
+                                                                            .getDimension(ctx, "dimension").dimension()
+                                                                            .location();
                                                                     return handleOfflineTp(ctx, pos, dimId.toString());
-                                                                })
-                                                        )
-                                                )
-                                        )
+                                                                }))))
                                         .then(Commands.literal("in")
                                                 .then(Commands.argument("dimension", DimensionArgument.dimension())
                                                         .executes(ctx -> {
-                                                            ResourceLocation dimId = DimensionArgument.getDimension(ctx, "dimension").dimension().location();
+                                                            ResourceLocation dimId = DimensionArgument
+                                                                    .getDimension(ctx, "dimension").dimension()
+                                                                    .location();
                                                             return handleOfflineTp(ctx, null, dimId.toString());
-                                                        })
-                                                )
-                                        )
-                                )
-                        )
-        );
+                                                        }))))));
     }
 
     private static int handleOfflineTp(CommandContext<CommandSourceStack> ctx, Vec3 pos, String dimensionId) {
@@ -101,13 +100,18 @@ public class ModCommands {
 
         // 统一存入待传送列表，无论在线还是离线，下次登录时传送
         TeleportManager.addPending(uuid, finalX, finalY, finalZ, dimensionId, playerName);
-        ctx.getSource().sendSuccess(() -> Component.literal("已设置 " + playerName + " 下次上线传送至维度 " + dimensionId + " 的 (" + String.format("%.1f", finalX) + ", " + String.format("%.1f", finalY) + ", " + String.format("%.1f", finalZ) + ")"), true);
+        ctx.getSource().sendSuccess(
+                () -> Component.literal(
+                        "已设置 " + playerName + " 下次上线传送至维度 " + dimensionId + " 的 (" + String.format("%.1f", finalX)
+                                + ", " + String.format("%.1f", finalY) + ", " + String.format("%.1f", finalZ) + ")"),
+                true);
         return 1;
     }
 
     private static ServerLevel getLevelByDimensionId(MinecraftServer server, String dimensionId) {
         ResourceLocation loc = ResourceLocation.tryParse(dimensionId);
-        if (loc == null) return null;
+        if (loc == null)
+            return null;
         ResourceKey<Level> dimensionKey = ResourceKey.create(Registries.DIMENSION, loc);
         return server.getLevel(dimensionKey);
     }

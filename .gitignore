@@ -18,3 +18,4 @@ classes/
 .settings
 *.launch
 .continue/tmp/
+.continue/rules/project_context.md

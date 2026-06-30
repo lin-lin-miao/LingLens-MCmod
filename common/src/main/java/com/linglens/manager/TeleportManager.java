@@ -44,7 +44,7 @@ public class TeleportManager {
                 }
             }
         } catch (Exception e) {
-            System.err.println("[LingLens] 加载待传送数据失败: " + e.getMessage());
+            System.err.println("[LingLens] 加载待传送数据失败(Loading pending data failed): " + e.getMessage());
         }
     }
 
@@ -53,7 +53,7 @@ public class TeleportManager {
         try (Writer writer = new FileWriter(DATA_FILE)) {
             GSON.toJson(PENDING_MAP.values().toArray(), writer);
         } catch (Exception e) {
-            System.err.println("[LingLens] 保存待传送数据失败: " + e.getMessage());
+            System.err.println("[LingLens] 保存待传送数据失败(Failed to save data to be transmitted): " + e.getMessage());
         }
     }
 
