@@ -41,14 +41,13 @@ public class ServerPlayerMixin {
                     ServerLevel targetLevel = server.getLevel(dimKey);
                     if (targetLevel != null && !targetLevel.dimension().location()
                             .equals(player.level().dimension().location())) {
+                        // 维度修改位置
                         player.setServerLevel(targetLevel);
                         compound.putString("Dimension", pending.getDimension());
-                        LOGGER.info("LingLens: 跨维度调整 - 从 {} 切换到 {}",
-                                player.level().dimension().location(), dimLoc);
                     }
                 }
             }
-            LOGGER.info("LingLens: player: {} Transferred to {} ({}, {}, {})",
+            LOGGER.info("[LingLens] player: {} Transferred to {} ({}, {}, {})",
                     player.getName().getString(),
                     pending.getDimension(),
                     String.format("%.2f", pending.getX()),

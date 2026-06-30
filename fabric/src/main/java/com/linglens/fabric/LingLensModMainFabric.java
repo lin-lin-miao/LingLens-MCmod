@@ -17,6 +17,7 @@ public final class LingLensModMainFabric implements ModInitializer {
         // 服务器启动时：加载待传送数据
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             TeleportManager.loadFromFile();
+            
         });
 
         // 服务器停止时：保存待传送数据

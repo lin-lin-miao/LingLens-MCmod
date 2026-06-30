@@ -12,7 +12,11 @@ import java.io.Writer;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class TeleportManager {
+    private static final Logger LOGGER = LoggerFactory.getLogger("LingLens");
     private static final ConcurrentHashMap<UUID, PendingTeleport> PENDING_MAP = new ConcurrentHashMap<>();
     private static final File DATA_FILE = new File("config/linglens/pending_teleports.json");
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
@@ -35,7 +39,8 @@ public class TeleportManager {
     }
 
     public static void loadFromFile() {
-        if (!DATA_FILE.exists()) return;
+        if (!DATA_FILE.exists())
+            return;
         try (Reader reader = new FileReader(DATA_FILE)) {
             PendingTeleport[] array = GSON.fromJson(reader, PendingTeleport[].class);
             if (array != null) {
@@ -43,8 +48,9 @@ public class TeleportManager {
                     PENDING_MAP.put(p.getPlayerUuid(), p);
                 }
             }
+            LOGGER.info("[LingLens] 离线传送列表已读取(Offline transfer list read)");
         } catch (Exception e) {
-            System.err.println("[LingLens] 加载待传送数据失败(Loading pending data failed): " + e.getMessage());
+            LOGGER.error("[LingLens] 加载待传送数据失败(Loading pending data failed): ", e);
         }
     }
 
@@ -52,8 +58,9 @@ public class TeleportManager {
         DATA_FILE.getParentFile().mkdirs();
         try (Writer writer = new FileWriter(DATA_FILE)) {
             GSON.toJson(PENDING_MAP.values().toArray(), writer);
+            LOGGER.info("[LingLens] 离线传送列表已保存(Offline transfer list saved)");
         } catch (Exception e) {
-            System.err.println("[LingLens] 保存待传送数据失败(Failed to save data to be transmitted): " + e.getMessage());
+            LOGGER.error("[LingLens] 保存待传送数据失败(Failed to save data to be transmitted): ", e);
         }
     }
 

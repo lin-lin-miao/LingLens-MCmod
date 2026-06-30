@@ -7,6 +7,8 @@ description: Comprehensive Minecraft Server Management Module Development Guide
 
 在关键代码、主要函数上加入注释
 
+日志信息使用`org.slf4j.LoggerFactory.getLogger("LingLens")`，格式`[LingLens] 日志信息`
+
 项目名称:LingLens - 灵棱枢
 
 综合Minecraft服务器管理模组开发指南

@@ -17,7 +17,7 @@ description: Game performance query
 | 步骤 | 模块                | 任务内容                                                                 |
 |------|---------------------|--------------------------------------------------------------------------|
 | 1    | common              | 创建 PerformanceQuery 工具类，封装 TPS/MSPT 计算逻辑                      |
-| 2    | common              | 设计命令 `/linglens tps` 及 `/linglens mspt`（别名 `/linglens perf`）     |
+| 2    | common              | 设计命令 `/linglens perf`(获取所有性能相关子命令) 及 `/linglens perf tps` 和 `/linglens perf mspt`，所有人均可获取|
 | 3    | common              | 实现命令执行逻辑：获取 MinecraftServer 实例，读取 tick 数据               |
 | 4    | fabric / forge      | 确保跨平台获取 MinecraftServer 的方式一致（使用 Architectury API 或各平台特有方法） |
 | 5    | common              | 添加各维度（Dimension）的 tick 耗时统计，输出到命令反馈                   |
