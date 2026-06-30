@@ -1,9 +1,12 @@
 package com.linglens.command;
 
 import com.linglens.manager.TeleportManager;
+import com.linglens.performance.PerformanceQuery;
+import com.linglens.performance.PerformanceResult;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import net.minecraft.commands.CommandSourceStack;
@@ -21,14 +24,14 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
+import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class ModCommands {
-        private static final Logger LOGGER = LoggerFactory.getLogger("LingLens");
-
+    private static final Logger LOGGER = LoggerFactory.getLogger("LingLens");
 
     private static final SuggestionProvider<CommandSourceStack> PLAYER_SUGGESTIONS = (ctx, builder) -> {
         MinecraftServer server = ctx.getSource().getServer();
@@ -39,33 +42,115 @@ public class ModCommands {
     };
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(
-                Commands.literal("linglens")
-                        .then(Commands.literal("offline-tp")
-                                .requires(src -> src.hasPermission(4))
-                                .then(Commands.argument("player", StringArgumentType.word())
-                                        .suggests(PLAYER_SUGGESTIONS)
-                                        // 仅玩家名 → 主世界出生点
-                                        .executes(ctx -> handleOfflineTp(ctx, null,
-                                                Level.OVERWORLD.location().toString()))
-                                        .then(Commands.argument("location", Vec3Argument.vec3())
-                                                .executes(ctx -> {
-                                                    Vec3 pos = Vec3Argument.getVec3(ctx, "location");
-                                                    return handleOfflineTp(ctx, pos,
-                                                            Level.OVERWORLD.location().toString());
-                                                })
-                                                .then(Commands
-                                                        .argument("dimension", DimensionArgument.dimension())
-                                                        .executes(ctx -> {
-                                                            Vec3 pos = Vec3Argument.getVec3(ctx, "location");
-                                                            ResourceLocation dimId = DimensionArgument
-                                                                    .getDimension(ctx, "dimension").dimension()
-                                                                    .location();
-                                                            return handleOfflineTp(ctx, pos, dimId.toString());
-                                                        })))))
-                        // .then(Commands.literal("offline-tp"))
-        // 命令结束位
-        );
+        LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("linglens");
+        LiteralArgumentBuilder<CommandSourceStack> offline_tp = Commands.literal("offline-tp");
+        {// 离线玩家传送命令注册
+            offline_tp.requires(src -> src.hasPermission(4))
+                    .then(Commands.argument("player", StringArgumentType.word())
+                            .suggests(PLAYER_SUGGESTIONS)
+                            // 仅玩家名 → 主世界出生点
+                            .executes(ctx -> handleOfflineTp(ctx, null,
+                                    Level.OVERWORLD.location().toString()))
+                            .then(Commands.argument("location", Vec3Argument.vec3())
+                                    .executes(ctx -> {
+                                        Vec3 pos = Vec3Argument.getVec3(ctx, "location");
+                                        return handleOfflineTp(ctx, pos,
+                                                Level.OVERWORLD.location().toString());
+                                    })
+                                    .then(Commands
+                                            .argument("dimension", DimensionArgument.dimension())
+                                            .executes(ctx -> {
+                                                Vec3 pos = Vec3Argument.getVec3(ctx, "location");
+                                                ResourceLocation dimId = DimensionArgument
+                                                        .getDimension(ctx, "dimension").dimension()
+                                                        .location();
+                                                return handleOfflineTp(ctx, pos, dimId.toString());
+                                            }))));
+        }
+        root.then(offline_tp);
+
+        // ========== TPS 子命令 ==========
+        // 所有人可执行，无需权限
+        root.then(Commands.literal("tps")
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    PerformanceResult result = PerformanceQuery.query(server);
+
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("§eTPS: §a").append(String.format("%.2f", result.tps())).append("\n");
+
+                    if (result.dimensionMspt() != null && !result.dimensionMspt().isEmpty()) {
+                        // 寻找最高MSPT维度（值最大，即最卡的维度）
+                        Map.Entry<String, Double> maxEntry = result.dimensionMspt().entrySet().stream()
+                                .max(Map.Entry.comparingByValue())
+                                .orElse(null);
+                        if (maxEntry != null) {
+                            String dimName = maxEntry.getKey().replace("minecraft:", "");
+                            sb.append("§e最高MSPT维度: §a").append(dimName)
+                                    .append(" §f").append(String.format("%.2f", maxEntry.getValue())).append(" ms\n");
+                        }
+
+                        // 按MSPT从大到小排序（越卡越靠前）
+                        sb.append("§e各个维度MSPT(由大到小排序):\n");
+                        result.dimensionMspt().entrySet().stream()
+                                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                                .forEach(entry -> {
+                                    String dimName = entry.getKey();
+                                    sb.append("  §f").append(dimName).append(": §a")
+                                            .append(String.format("%.2f", entry.getValue())).append(" ms\n");
+                                });
+                    }
+
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal(sb.toString()),
+                            false);
+                    return 1;
+                }));
+
+        // ========== MSPT 子命令 ==========
+        root.then(Commands.literal("mspt")
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    PerformanceResult result = PerformanceQuery.query(server);
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal("§eMSPT: §a" + String.format("%.2f", result.mspt()) + " ms"),
+                            false);
+                    return 1;
+                }));
+
+        // ========== 性能总览子命令 ==========
+        root.then(Commands.literal("perf")
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    PerformanceResult result = PerformanceQuery.query(server);
+                    // 构建详细信息
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("§e=== §6LingLens 性能总览 §e===\n");
+                    sb.append("§fTPS: §a").append(String.format("%.2f", result.tps())).append("\n");
+                    sb.append("§fMSPT: §a").append(String.format("%.2f", result.mspt())).append(" ms\n");
+                    sb.append("§f在线玩家: §a")
+                            .append(server.getPlayerCount())
+                            .append(" / ")
+                            .append(server.getMaxPlayers())
+                            .append("\n");
+                    // 显示各维度 MSPT 详情（由 DimensionTickTracker 提供）
+                    if (result.dimensionMspt() != null && !result.dimensionMspt().isEmpty()) {
+                        sb.append("§7维度详情(由大到小排序):\n");
+                        result.dimensionMspt().entrySet().stream()
+                                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                                .forEach(entry -> {
+                                    // 去除 "minecraft:" 前缀，让显示更简洁
+                                    String dimName = entry.getKey().replace("minecraft:", "");
+                                    sb.append("  §f").append(dimName)
+                                            .append(": §a").append(String.format("%.2f", entry.getValue()))
+                                            .append(" ms\n");
+                                });
+                    }
+                    ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
+                    return 1;
+                }));
+
+        dispatcher.register(root);
         LOGGER.info("[LingLens] 命令已注册(Command registered)");
     }
 
@@ -121,15 +206,4 @@ public class ModCommands {
                 true);
         return 1;
     }
-
-    /**
-     * 根据维度 ID 字符串获取 ServerLevel。
-     */
-    // private static ServerLevel getLevelByDimensionId(MinecraftServer server, String dimensionId) {
-    //     ResourceLocation loc = ResourceLocation.tryParse(dimensionId);
-    //     if (loc == null)
-    //         return null;
-    //     ResourceKey<Level> dimensionKey = ResourceKey.create(Registries.DIMENSION, loc);
-    //     return server.getLevel(dimensionKey);
-    // }
 }

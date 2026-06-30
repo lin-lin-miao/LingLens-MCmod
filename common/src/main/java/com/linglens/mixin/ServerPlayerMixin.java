@@ -39,10 +39,7 @@ public class ServerPlayerMixin {
                     ResourceKey<Level> dimKey = ResourceKey.create(
                             net.minecraft.core.registries.Registries.DIMENSION, dimLoc);
                     ServerLevel targetLevel = server.getLevel(dimKey);
-                    if (targetLevel != null && !targetLevel.dimension().location()
-                            .equals(player.level().dimension().location())) {
-                        // 维度修改位置
-                        player.setServerLevel(targetLevel);
+                    if (targetLevel != null) {
                         compound.putString("Dimension", pending.getDimension());
                     }
                 }
