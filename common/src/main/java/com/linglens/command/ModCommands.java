@@ -2,6 +2,7 @@ package com.linglens.command;
 
 import com.linglens.manager.TeleportManager;
 import com.linglens.performance.PerformanceQuery;
+import com.linglens.performance.SystemPerfResult;
 import com.linglens.performance.PerformanceResult;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
@@ -69,9 +70,25 @@ public class ModCommands {
         }
         root.then(offline_tp);
 
-        // ========== TPS 子命令 ==========
-        // 所有人可执行，无需权限
-        root.then(Commands.literal("tps")
+        // ========== perf 命令组 ==========
+        LiteralArgumentBuilder<CommandSourceStack> perfCommand = Commands.literal("perf");
+
+        // /linglens perf system —— 系统性能（CPU / 内存）
+        perfCommand.then(Commands.literal("system")
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    SystemPerfResult sysResult = PerformanceQuery.getSystemPerf(server);
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal(sysResult.toReadableString()),
+                            false);
+                    LOGGER.debug("[LingLens] 系统性能命令执行: CPU={}, 内存={:.2f}MB",
+                            sysResult.cpuPercent() >= 0 ? String.format("%.2f%%", sysResult.cpuPercent()) : "N/A",
+                            sysResult.usedMemoryMB());
+                    return 1;
+                }));
+
+        // /linglens perf tps —— 游戏性能（TPS + 各维度 MSPT）
+        perfCommand.then(Commands.literal("tps")
                 .executes(ctx -> {
                     MinecraftServer server = ctx.getSource().getServer();
                     PerformanceResult result = PerformanceQuery.query(server);
@@ -107,48 +124,71 @@ public class ModCommands {
                     return 1;
                 }));
 
-        // ========== MSPT 子命令 ==========
-        root.then(Commands.literal("mspt")
-                .executes(ctx -> {
-                    MinecraftServer server = ctx.getSource().getServer();
-                    PerformanceResult result = PerformanceQuery.query(server);
-                    ctx.getSource().sendSuccess(
-                            () -> Component.literal("§eMSPT: §a" + String.format("%.2f", result.mspt()) + " ms"),
-                            false);
-                    return 1;
-                }));
+        // /linglens perf —— 综合性能（系统资源 + 游戏性能）
+        perfCommand.executes(ctx -> {
+            MinecraftServer server = ctx.getSource().getServer();
+            // 同时获取游戏性能与系统性能
+            PerformanceResult gameResult = PerformanceQuery.query(server);
+            SystemPerfResult sysResult = PerformanceQuery.getSystemPerf(server);
 
-        // ========== 性能总览子命令 ==========
-        root.then(Commands.literal("perf")
-                .executes(ctx -> {
-                    MinecraftServer server = ctx.getSource().getServer();
-                    PerformanceResult result = PerformanceQuery.query(server);
-                    // 构建详细信息
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("§e=== §6LingLens 性能总览 §e===\n");
-                    sb.append("§fTPS: §a").append(String.format("%.2f", result.tps())).append("\n");
-                    sb.append("§fMSPT: §a").append(String.format("%.2f", result.mspt())).append(" ms\n");
-                    sb.append("§f在线玩家: §a")
-                            .append(server.getPlayerCount())
-                            .append(" / ")
-                            .append(server.getMaxPlayers())
-                            .append("\n");
-                    // 显示各维度 MSPT 详情（由 DimensionTickTracker 提供）
-                    if (result.dimensionMspt() != null && !result.dimensionMspt().isEmpty()) {
-                        sb.append("§7维度详情(由大到小排序):\n");
-                        result.dimensionMspt().entrySet().stream()
-                                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                                .forEach(entry -> {
-                                    // 去除 "minecraft:" 前缀，让显示更简洁
-                                    String dimName = entry.getKey().replace("minecraft:", "");
-                                    sb.append("  §f").append(dimName)
-                                            .append(": §a").append(String.format("%.2f", entry.getValue()))
-                                            .append(" ms\n");
-                                });
-                    }
-                    ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
-                    return 1;
-                }));
+            StringBuilder sb = new StringBuilder();
+            sb.append("§e=== §6LingLens 综合性能总览 §e===\n");
+
+            // ---- 系统性能部分 ----
+            sb.append("§6[ 系统资源 ]\n");
+            sb.append("§fCPU: §")
+                    .append(sysResult.cpuPercent() >= 0 ? "a" : "c")
+                    .append(sysResult.cpuPercent() >= 0
+                            ? String.format("%.2f%%", sysResult.cpuPercent())
+                            : "不可用")
+                    .append("\n");
+            sb.append("§f内存: §a")
+                    .append(String.format("%.2f", sysResult.usedMemoryMB()))
+                    .append(" MB / ")
+                    .append(String.format("%.2f", sysResult.allocatedMemoryMB()))
+                    .append(" MB (已分配) / ")
+                    .append(String.format("%.2f", sysResult.maxMemoryMB()))
+                    .append(" MB (最大)\n");
+            sb.append("§7内存占用率: §a")
+                    .append(String.format("%.1f%%",
+                            sysResult.maxMemoryMB() > 0
+                                    ? (sysResult.usedMemoryMB() / sysResult.maxMemoryMB()) * 100.0
+                                    : 0))
+                    .append("\n");
+
+            // ---- 游戏性能部分 ----
+            sb.append("§6[ 游戏性能 ]\n");
+            sb.append("§fTPS: §a").append(String.format("%.2f", gameResult.tps())).append("\n");
+            sb.append("§fMSPT: §a").append(String.format("%.2f", gameResult.mspt())).append(" ms\n");
+            sb.append("§f在线玩家: §a")
+                    .append(server.getPlayerCount())
+                    .append(" / ")
+                    .append(server.getMaxPlayers())
+                    .append("\n");
+
+            // 各维度 MSPT 详情
+            if (gameResult.dimensionMspt() != null && !gameResult.dimensionMspt().isEmpty()) {
+                sb.append("§7各维度 MSPT (由大到小):\n");
+                gameResult.dimensionMspt().entrySet().stream()
+                        .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                        .forEach(entry -> {
+                            String dimName = entry.getKey().replace("minecraft:", "");
+                            sb.append("  §f").append(dimName)
+                                    .append(": §a").append(String.format("%.2f", entry.getValue()))
+                                    .append(" ms\n");
+                        });
+            }
+
+            ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
+            LOGGER.debug("[LingLens] 综合性能命令执行: TPS={}, MSPT={}ms, CPU={}, 内存={:.2f}MB",
+                    String.format("%.2f", gameResult.tps()),
+                    String.format("%.2f", gameResult.mspt()),
+                    sysResult.cpuPercent() >= 0 ? String.format("%.2f%%", sysResult.cpuPercent()) : "N/A",
+                    sysResult.usedMemoryMB());
+            return 1;
+        });
+
+        root.then(perfCommand);
 
         dispatcher.register(root);
         LOGGER.info("[LingLens] 命令已注册(Command registered)");

@@ -5,6 +5,7 @@ import net.minecraft.server.level.ServerLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.management.ManagementFactory;
 import java.lang.reflect.Field;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -33,6 +34,58 @@ public class PerformanceQuery {
     /** 纳秒转毫秒的换算系数 */
     private static final long NANOS_TO_MILLIS = 1_000_000L;
 
+    public static PerformanceResult query(MinecraftServer server) {
+        return getGamePerf(server);
+    }
+
+    /**
+     * 获取当前 JVM 的系统性能数据（CPU 占用百分比、内存使用情况），并返回结果对象。
+     * 参考 getGamePerf 的返回风格，将系统性能数据封装为 SystemPerfResult。
+     *
+     * @param server MinecraftServer 实例（暂未使用，保留参数以兼容后续扩展）
+     * @return SystemPerfResult 包含 CPU 百分比、已用/总/最大内存（MB）
+     */
+    public static SystemPerfResult getSystemPerf(MinecraftServer server) {
+        Runtime runtime = Runtime.getRuntime();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+        long maxMemory = runtime.maxMemory();
+
+        double usedMb = bytesToMb(usedMemory);
+        double totalMb = bytesToMb(totalMemory);
+        double maxMb = bytesToMb(maxMemory);
+
+        // CPU 占用（百分比）
+        double cpuPercent = -1.0;
+        try {
+            java.lang.management.OperatingSystemMXBean osBean = ManagementFactory.getOperatingSystemMXBean();
+            if (osBean instanceof com.sun.management.OperatingSystemMXBean sunOsBean) {
+                double load = sunOsBean.getProcessCpuLoad();
+                if (load >= 0) {
+                    cpuPercent = load * 100.0;
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warn("[LingLens] 获取 JVM CPU 占用失败: {}", e.getMessage());
+        }
+
+        LOGGER.debug("[LingLens] 系统性能: CPU={}%, 内存={:.2f}/{:.2f}/{:.2f} MB",
+                cpuPercent >= 0 ? String.format("%.2f", cpuPercent) : "N/A",
+                usedMb, totalMb, maxMb);
+
+        return new SystemPerfResult(cpuPercent, usedMb, totalMb, maxMb);
+    }
+
+    
+
+    /**
+     * 将字节数转换为 MB，保留两位小数
+     */
+    private static double bytesToMb(long bytes) {
+        return bytes / 1024.0 / 1024.0;
+    }
+
     /**
      * 执行查询，获取当前服务器的 TPS、MSPT 以及各维度的 MSPT。
      * 核心逻辑：
@@ -45,7 +98,7 @@ public class PerformanceQuery {
      * @param server MinecraftServer 实例
      * @return 包含全部性能数据的 PerformanceResult 对象
      */
-    public static PerformanceResult query(MinecraftServer server) {
+    public static PerformanceResult getGamePerf(MinecraftServer server) {
         // 1. 获取 tick 耗时数组（环形缓冲区）和当前写入索引
         long[] tickTimes = getTickTimes(server);
         int tickCount = getTickCount(server);
@@ -91,7 +144,6 @@ public class PerformanceQuery {
                 String.format("%.2f", avgMs),
                 tickCount,
                 writeIndex);
-
         return new PerformanceResult(tps, avgMs, dimensionMspt);
     }
 
