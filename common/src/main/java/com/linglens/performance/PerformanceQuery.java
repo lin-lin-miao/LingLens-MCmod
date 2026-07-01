@@ -1,21 +1,22 @@
 package com.linglens.performance;
 
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.lang.management.ManagementFactory;
 import java.lang.reflect.Field;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * 性能查询工具类。
- * 封装 TPS/MSPT 的计算逻辑，通过反射读取 MinecraftServer 中的 tickTimes 环形缓冲区数组。
- * MinecraftServer.tickTimes 是长度为 100 的 long[]，用作环形缓冲区，
- * 写入索引由 tickCount % 100 决定。
- * 各维度的 MSPT 通过 DimensionTickTracker (ServerLevelMixin 注入) 获取。
+ * 封装 TPS/MSPT 的计算逻辑。
+ * <p>
+ * 全局游戏性能数据完全依赖 {@link DimensionTickTracker} 的记录，
+ * 该跟踪器通过 ServerLevelMixin 在每次维度 tick 时收集耗时数据。
+ * <p>
+ * 各维度 tick 串行执行，因此全局 MSPT = 各维度 MSPT 之和，
+ * TPS = min(20.0, 1000 ms / 全局 MSPT)。
  * 适用于 Minecraft 1.20.1 及类似版本。
  */
 public class PerformanceQuery {
@@ -77,8 +78,6 @@ public class PerformanceQuery {
         return new SystemPerfResult(cpuPercent, usedMb, totalMb, maxMb);
     }
 
-    
-
     /**
      * 将字节数转换为 MB，保留两位小数
      */
@@ -88,113 +87,96 @@ public class PerformanceQuery {
 
     /**
      * 执行查询，获取当前服务器的 TPS、MSPT 以及各维度的 MSPT。
+     * <p>
      * 核心逻辑：
-     * 1. 通过反射获取 tickTimes 环形缓冲区（long[100]）
-     * 2. 通过反射获取 tickCount（当前写入索引）
-     * 3. 从 tickCount 往前倒推 SAMPLE_COUNT 个有效 tick，计算平均 MSPT
-     * 4. TPS = min(20.0, 1000 / 平均 MSPT)
-     * 5. 从 DimensionTickTracker 获取各维度 MSPT
+     * 1. 从 DimensionTickTracker 获取各维度 MSPT（已按 SAMPLE_COUNT 采样平均）。
+     * 2. 全局 MSPT = 各维度 MSPT 之和（各维度 tick 串行执行）。
+     * 3. TPS = min(20.0, 1000 / 全局 MSPT)。
+     * <p>
+     * 若维度数据为空（服务器刚启动尚未收集到数据），返回默认值（20 TPS, 0 MSPT）。
      *
      * @param server MinecraftServer 实例
      * @return 包含全部性能数据的 PerformanceResult 对象
      */
     public static PerformanceResult getGamePerf(MinecraftServer server) {
-        // 1. 获取 tick 耗时数组（环形缓冲区）和当前写入索引
-        long[] tickTimes = getTickTimes(server);
-        int tickCount = getTickCount(server);
-
-        if (tickTimes == null || tickTimes.length == 0) {
-            LOGGER.warn("[LingLens] tickTimes 数组为空或无法获取，返回默认值");
-            return new PerformanceResult(IDEAL_TPS, 0.0, getDimensionMspt());
-        }
-
-        // 2. 从环形缓冲区中取出最近 SAMPLE_COUNT 个有效 tick 耗时
-        int capacity = TICK_TIMES_CAPACITY;
-        int writeIndex = tickCount % capacity; // 当前写入位置（下一个将覆盖的位置）
-        int available = Math.min(tickCount, capacity); // 实际有多少个有效数据
-        int count = Math.min(SAMPLE_COUNT, available);
-
-        long sumNanos = 0;
-        for (int i = 0; i < count; i++) {
-            // 从 writeIndex - 1 往前取（最旧的先写，最新的后写）
-            int idx = (writeIndex - 1 - i) % capacity;
-            if (idx < 0) {
-                idx += capacity;
-            }
-            sumNanos += tickTimes[idx];
-        }
-
-        // 3. 计算平均 MSPT（毫秒）
-        double avgNanos = (double) sumNanos / count;
-        double avgMs = avgNanos / NANOS_TO_MILLIS;
-
-        // 4. 计算 TPS（封顶 20.0）
-        double tps;
-        if (avgMs > 0.0) {
-            tps = Math.min(IDEAL_TPS, 1000.0 / avgMs);
-        } else {
-            tps = IDEAL_TPS;
-        }
-
-        // 5. 获取各维度 MSPT（由 DimensionTickTracker 提供）
+        // 1. 从 DimensionTickTracker 获取各维度 MSPT（毫秒）
         Map<String, Double> dimensionMspt = getDimensionMspt();
 
-        LOGGER.debug("[LingLens] 性能查询结果: TPS={}, MSPT={}ms, tickCount={}, writeIndex={}",
-                String.format("%.2f", tps),
-                String.format("%.2f", avgMs),
-                tickCount,
-                writeIndex);
-        return new PerformanceResult(tps, avgMs, dimensionMspt);
+        if (dimensionMspt.isEmpty()) {
+            // 尚未收集到任何维度数据，返回默认值
+            LOGGER.info("[LingLens] 暂无维度 tick 数据，返回默认性能值");
+            return new PerformanceResult(IDEAL_TPS, 0, 0.0, dimensionMspt);
+        }
+
+        // 2. 全局 MSPT = 各维度 MSPT 之和（各维度 tick 串行执行）
+        double totalMspt = 0.0;
+        for (double mspt : dimensionMspt.values()) {
+            totalMspt += mspt;
+        }
+
+        // 3. 计算 TPS（封顶 20.0）
+        double tps;
+        double idletps;
+        if (totalMspt > 0.0) {
+            double maxtps = 1000.0 / totalMspt;
+            tps = Math.min(IDEAL_TPS, maxtps);
+            idletps = maxtps - tps;
+        } else {
+            tps = IDEAL_TPS;
+            idletps = 0;
+        }
+
+        LOGGER.debug("[LingLens] 游戏性能查询结果: TPS={}+{}, MSPT={}ms, 维度数量={}",
+                String.format("%.2f", tps), String.format("%.2f", idletps),
+                String.format("%.2f", totalMspt),
+                dimensionMspt.size());
+
+        return new PerformanceResult(tps, idletps, totalMspt, dimensionMspt);
     }
 
     /**
      * 通过反射获取 MinecraftServer 中的 tickTimes 数组。
-     * Minecraft 1.20.1 中 tickTimes 为 long[100]，作为环形缓冲区使用。
+     * <p>
+     * 
+     * @deprecated 不再使用此方法；游戏性能数据完全依赖 DimensionTickTracker。
+     *             保留代码仅供跨平台备选方案参考。
      *
      * @param server MinecraftServer 实例
      * @return tick 耗时数组（单位：纳秒），若获取失败则返回空数组
      */
+    @Deprecated
     private static long[] getTickTimes(MinecraftServer server) {
         try {
-            // 尝试直接访问字段名 tickTimes
             Field field = MinecraftServer.class.getDeclaredField("tickTimes");
             field.setAccessible(true);
             Object obj = field.get(server);
             if (obj instanceof long[]) {
                 return (long[]) obj;
-            } else if (obj == null) {
-                LOGGER.warn("[LingLens] tickTimes 字段为 null");
-            } else {
-                LOGGER.warn("[LingLens] tickTimes 字段类型异常，期望 long[]，实际: {}", obj.getClass().getName());
             }
-        } catch (NoSuchFieldException e) {
-            LOGGER.error("[LingLens] 未找到 tickTimes 字段 (NoSuchFieldException): {}", e.getMessage());
-        } catch (IllegalAccessException e) {
-            LOGGER.error("[LingLens] 无法访问 tickTimes 字段 (IllegalAccessException): {}", e.getMessage());
+        } catch (Exception e) {
+            LOGGER.debug("[LingLens] getTickTimes 反射失败（已预期，改用 DimensionTickTracker）");
         }
         return new long[0];
     }
 
     /**
-     * 通过反射获取 MinecraftServer 中的 tickCount 字段，即当前已执行的 tick 总数。
-     * 用于确定环形缓冲区中哪些数据是有效的。
-     * 如果获取失败，则使用 tickTimes 全量数据（对新服务器可能不精确）。
+     * 通过反射获取 MinecraftServer 中的 tickCount 字段。
+     * <p>
+     * 
+     * @deprecated 不再使用此方法；游戏性能数据完全依赖 DimensionTickTracker。
+     *             保留代码仅供跨平台备选方案参考。
      *
      * @param server MinecraftServer 实例
      * @return 当前 tick 计数
      */
+    @Deprecated
     private static int getTickCount(MinecraftServer server) {
         try {
-            // MinecraftServer.tickCount 是 int 类型，记录总 tick 数
             Field field = MinecraftServer.class.getDeclaredField("tickCount");
             field.setAccessible(true);
             return field.getInt(server);
-        } catch (NoSuchFieldException e) {
-            LOGGER.warn("[LingLens] 未找到 tickCount 字段，回退到全量数据模式: {}", e.getMessage());
-            // 回退：返回大数，使得环形缓冲区被视为写满状态
-            return TICK_TIMES_CAPACITY * 2;
-        } catch (IllegalAccessException e) {
-            LOGGER.error("[LingLens] 无法访问 tickCount 字段: {}", e.getMessage());
+        } catch (Exception e) {
+            LOGGER.debug("[LingLens] getTickCount 反射失败（已预期，改用 DimensionTickTracker）");
             return TICK_TIMES_CAPACITY * 2;
         }
     }

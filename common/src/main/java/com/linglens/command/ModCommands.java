@@ -25,6 +25,8 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
+import java.text.MessageFormat;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.UUID;
 
@@ -79,11 +81,8 @@ public class ModCommands {
                     MinecraftServer server = ctx.getSource().getServer();
                     SystemPerfResult sysResult = PerformanceQuery.getSystemPerf(server);
                     ctx.getSource().sendSuccess(
-                            () -> Component.literal(sysResult.toReadableString()),
+                            () -> Component.literal(getFormatSysmsg(sysResult)),
                             false);
-                    LOGGER.debug("[LingLens] 系统性能命令执行: CPU={}, 内存={:.2f}MB",
-                            sysResult.cpuPercent() >= 0 ? String.format("%.2f%%", sysResult.cpuPercent()) : "N/A",
-                            sysResult.usedMemoryMB());
                     return 1;
                 }));
 
@@ -91,35 +90,9 @@ public class ModCommands {
         perfCommand.then(Commands.literal("tps")
                 .executes(ctx -> {
                     MinecraftServer server = ctx.getSource().getServer();
-                    PerformanceResult result = PerformanceQuery.query(server);
-
-                    StringBuilder sb = new StringBuilder();
-                    sb.append("§eTPS: §a").append(String.format("%.2f", result.tps())).append("\n");
-
-                    if (result.dimensionMspt() != null && !result.dimensionMspt().isEmpty()) {
-                        // 寻找最高MSPT维度（值最大，即最卡的维度）
-                        Map.Entry<String, Double> maxEntry = result.dimensionMspt().entrySet().stream()
-                                .max(Map.Entry.comparingByValue())
-                                .orElse(null);
-                        if (maxEntry != null) {
-                            String dimName = maxEntry.getKey().replace("minecraft:", "");
-                            sb.append("§e最高MSPT维度: §a").append(dimName)
-                                    .append(" §f").append(String.format("%.2f", maxEntry.getValue())).append(" ms\n");
-                        }
-
-                        // 按MSPT从大到小排序（越卡越靠前）
-                        sb.append("§e各个维度MSPT(由大到小排序):\n");
-                        result.dimensionMspt().entrySet().stream()
-                                .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                                .forEach(entry -> {
-                                    String dimName = entry.getKey();
-                                    sb.append("  §f").append(dimName).append(": §a")
-                                            .append(String.format("%.2f", entry.getValue())).append(" ms\n");
-                                });
-                    }
-
+                    PerformanceResult gameResult = PerformanceQuery.query(server);
                     ctx.getSource().sendSuccess(
-                            () -> Component.literal(sb.toString()),
+                            () -> Component.literal(getFormatGamemsg(server, gameResult)),
                             false);
                     return 1;
                 }));
@@ -132,56 +105,14 @@ public class ModCommands {
             SystemPerfResult sysResult = PerformanceQuery.getSystemPerf(server);
 
             StringBuilder sb = new StringBuilder();
-            sb.append("§e=== §6LingLens 综合性能总览 §e===\n");
-
-            // ---- 系统性能部分 ----
-            sb.append("§6[ 系统资源 ]\n");
-            sb.append("§fCPU: §")
-                    .append(sysResult.cpuPercent() >= 0 ? "a" : "c")
-                    .append(sysResult.cpuPercent() >= 0
-                            ? String.format("%.2f%%", sysResult.cpuPercent())
-                            : "不可用")
-                    .append("\n");
-            sb.append("§f内存: §a")
-                    .append(String.format("%.2f", sysResult.usedMemoryMB()))
-                    .append(" MB / ")
-                    .append(String.format("%.2f", sysResult.allocatedMemoryMB()))
-                    .append(" MB (已分配) / ")
-                    .append(String.format("%.2f", sysResult.maxMemoryMB()))
-                    .append(" MB (最大)\n");
-            sb.append("§7内存占用率: §a")
-                    .append(String.format("%.1f%%",
-                            sysResult.maxMemoryMB() > 0
-                                    ? (sysResult.usedMemoryMB() / sysResult.maxMemoryMB()) * 100.0
-                                    : 0))
-                    .append("\n");
-
-            // ---- 游戏性能部分 ----
-            sb.append("§6[ 游戏性能 ]\n");
-            sb.append("§fTPS: §a").append(String.format("%.2f", gameResult.tps())).append("\n");
-            sb.append("§fMSPT: §a").append(String.format("%.2f", gameResult.mspt())).append(" ms\n");
-            sb.append("§f在线玩家: §a")
-                    .append(server.getPlayerCount())
-                    .append(" / ")
-                    .append(server.getMaxPlayers())
-                    .append("\n");
-
-            // 各维度 MSPT 详情
-            if (gameResult.dimensionMspt() != null && !gameResult.dimensionMspt().isEmpty()) {
-                sb.append("§7各维度 MSPT (由大到小):\n");
-                gameResult.dimensionMspt().entrySet().stream()
-                        .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
-                        .forEach(entry -> {
-                            String dimName = entry.getKey().replace("minecraft:", "");
-                            sb.append("  §f").append(dimName)
-                                    .append(": §a").append(String.format("%.2f", entry.getValue()))
-                                    .append(" ms\n");
-                        });
-            }
-
+            sb.append("§e=== §6[LingLens] 综合性能总览 §e===\n");
+            sb.append(getFormatSysmsg(sysResult));
+            sb.append(getFormatGamemsg(server, gameResult));
+            // 实体性能
+            // 区块性能
             ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
-            LOGGER.debug("[LingLens] 综合性能命令执行: TPS={}, MSPT={}ms, CPU={}, 内存={:.2f}MB",
-                    String.format("%.2f", gameResult.tps()),
+            LOGGER.debug("[LingLens] 综合性能命令执行: TPS={}+{}, MSPT={}ms, CPU={}, 内存={:.2f}MB",
+                    String.format("%.2f", gameResult.tps()), String.format("%.2f", gameResult.idletps()),
                     String.format("%.2f", gameResult.mspt()),
                     sysResult.cpuPercent() >= 0 ? String.format("%.2f%%", sysResult.cpuPercent()) : "N/A",
                     sysResult.usedMemoryMB());
@@ -192,6 +123,66 @@ public class ModCommands {
 
         dispatcher.register(root);
         LOGGER.info("[LingLens] 命令已注册(Command registered)");
+    }
+
+    public static String getFormatGamemsg(MinecraftServer server, PerformanceResult gameResult) {
+        // ----- 游戏性能部分（使用 MessageFormat）-----
+        StringBuilder gamemsg = new StringBuilder();
+        MessageFormat gameMf = new MessageFormat(
+                "§6=== [ 游戏性能 ] ===\n" +
+                        "§fTPS: §{0}{1} / §{2}{3}\n" +
+                        "§fMSPT: §a{4} ms\n" +
+                        "§f在线玩家: §a{5} / §b{6} §f: {7}\n");
+        String tmp = gameMf.format(new Object[] {
+                gameResult.tps() < 18.0 ? "c" : "a",
+                String.format("%.2f", gameResult.tps()),
+                gameResult.tps() < 18.0 ? "c" : "a",
+                String.format("%.2f", gameResult.idletps()),
+                String.format("%.2f", gameResult.mspt()),
+                server.getPlayerCount(),
+                server.getMaxPlayers(), Arrays.toString(server.getPlayerNames())
+        });
+        gamemsg.append(tmp);
+        // 各维度 MSPT 详情
+        if (gameResult.dimensionMspt() != null && !gameResult.dimensionMspt().isEmpty()) {
+            // 寻找最高MSPT维度（值最大，即最卡的维度）
+            Map.Entry<String, Double> maxEntry = gameResult.dimensionMspt().entrySet().stream()
+                    .max(Map.Entry.comparingByValue())
+                    .orElse(null);
+            if (maxEntry != null) {
+                String dimName = maxEntry.getKey().replace("minecraft:", "");
+                gamemsg.append("§e最高MSPT维度: §a").append(dimName)
+                        .append(" §f").append(String.format("%.2f", maxEntry.getValue())).append(" ms\n");
+            }
+            // 按MSPT从大到小排序（越卡越靠前）
+            gamemsg.append("§e各个维度MSPT(由大到小排序):\n");
+            gameResult.dimensionMspt().entrySet().stream()
+                    .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                    .forEach(entry -> {
+                        String dimName = entry.getKey();
+                        gamemsg.append("  §f").append(dimName).append(": §a")
+                                .append(String.format("%.2f", entry.getValue())).append(" ms\n");
+                    });
+        }
+        return gamemsg.toString();
+    }
+
+    public static String getFormatSysmsg(SystemPerfResult sysResult) {
+        // ---- 系统性能部分 ----
+        MessageFormat sysmf = new MessageFormat(
+                "§6=== [ 系统资源 ] ===\n" +
+                        "§fCPU: §{0}{1}\n" +
+                        "§f内存: §a{2} MB / {3} MB (已分配)\n" +
+                        "§7内存占用率: §a{4}\n");
+        String sysmsg = sysmf.format(new Object[] { sysResult.cpuPercent() >= 50 ? "e" : "a",
+                String.format("%.2f%%", sysResult.cpuPercent()),
+                String.format("%.2f", sysResult.usedMemoryMB()), String.format("%.2f", sysResult.allocatedMemoryMB()),
+                String.format("%.1f%%",
+                        sysResult.allocatedMemoryMB() > 0
+                                ? (sysResult.usedMemoryMB() / sysResult.allocatedMemoryMB()) * 100.0
+                                : 0),
+        });
+        return sysmsg;
     }
 
     /**
