@@ -61,8 +61,8 @@ public class ForgeEntityEventListener {
     public static void onLevelUnload(LevelEvent.Unload event) {
         if (event.getLevel() instanceof ServerLevel serverLevel) {
             String dimKey = serverLevel.dimension().location().toString();
-            EntityStatsCache.getInstance().setDirty("维度卸载: " + dimKey);
-            LOGGER.info("[LingLens] 维度 {} 卸载，实体统计缓存已标记为脏", dimKey);
+            EntityStatsCache.getInstance().removeDimension(dimKey);
+            LOGGER.info("[LingLens] 维度 {} 卸载，移除缓存", dimKey);
         }
     }
 

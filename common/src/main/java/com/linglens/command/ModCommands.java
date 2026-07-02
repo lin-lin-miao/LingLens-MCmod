@@ -1,7 +1,7 @@
 package com.linglens.command;
 
 import com.linglens.entity.EntityStatsCache;
-import com.linglens.entity.QueryResult;
+import com.linglens.entity.EntityQueryResult;
 import com.linglens.manager.TeleportManager;
 import com.linglens.performance.PerformanceQuery;
 import com.linglens.performance.SystemPerfResult;
@@ -144,7 +144,7 @@ public class ModCommands {
         entityCommand.executes(ctx -> {
             MinecraftServer server = ctx.getSource().getServer();
             EntityStatsCache cache = EntityStatsCache.getInstance();
-            QueryResult result = cache.query(server);
+            EntityQueryResult result = cache.query(server);
             ctx.getSource().sendSuccess(
                     () -> Component.literal(result.toReadableString()),
                     false);
