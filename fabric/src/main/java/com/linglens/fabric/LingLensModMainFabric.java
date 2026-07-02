@@ -14,6 +14,9 @@ public final class LingLensModMainFabric implements ModInitializer {
         // Run our common setup.
         LingLensModMain.init();
 
+        // 注册实体事件监听器（实体统计缓存）
+        FabricEntityEventListener.register();
+
         // 服务器启动时：加载待传送数据
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             TeleportManager.loadFromFile();

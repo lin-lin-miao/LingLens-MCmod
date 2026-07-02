@@ -1,5 +1,7 @@
 package com.linglens.command;
 
+import com.linglens.entity.EntityStatsCache;
+import com.linglens.entity.QueryResult;
 import com.linglens.manager.TeleportManager;
 import com.linglens.performance.PerformanceQuery;
 import com.linglens.performance.SystemPerfResult;
@@ -26,13 +28,24 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 
 import java.text.MessageFormat;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.Map;
 import java.util.UUID;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * 灵棱枢 (LingLens) 命令注册与处理类。
+ * 包含三个命令组：
+ * <ul>
+ *   <li>offline-tp — 离线玩家位置修改</li>
+ *   <li>perf — 游戏/系统性能查询</li>
+ *   <li>entity — 实体数量查询与统计</li>
+ * </ul>
+ */
 public class ModCommands {
     private static final Logger LOGGER = LoggerFactory.getLogger("LingLens");
 
@@ -46,8 +59,11 @@ public class ModCommands {
 
     public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
         LiteralArgumentBuilder<CommandSourceStack> root = Commands.literal("linglens");
+
+        // ========== offline-tp 命令组 ==========
         LiteralArgumentBuilder<CommandSourceStack> offline_tp = Commands.literal("offline-tp");
-        {// 离线玩家传送命令注册
+
+        {
             offline_tp.requires(src -> src.hasPermission(4))
                     .then(Commands.argument("player", StringArgumentType.word())
                             .suggests(PLAYER_SUGGESTIONS)
@@ -121,8 +137,111 @@ public class ModCommands {
 
         root.then(perfCommand);
 
+        // ========== entity 命令组 ==========
+        LiteralArgumentBuilder<CommandSourceStack> entityCommand = Commands.literal("entity");
+
+        // /linglens entity —— 实体数量统计（常规查询）
+        entityCommand.executes(ctx -> {
+            MinecraftServer server = ctx.getSource().getServer();
+            EntityStatsCache cache = EntityStatsCache.getInstance();
+            QueryResult result = cache.query(server);
+            ctx.getSource().sendSuccess(
+                    () -> Component.literal(result.toReadableString()),
+                    false);
+            return 1;
+        });
+
+        // /linglens entity rebuild —— 手动重建缓存（需要 OP 权限）
+        entityCommand.then(Commands.literal("rebuild")
+                .requires(src -> src.hasPermission(4))
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal("§e[LingLens] 开始强制重建实体统计缓存..."),
+                            true);
+                    long start = System.currentTimeMillis();
+                    EntityStatsCache.getInstance().rebuild(server);
+                    long elapsed = System.currentTimeMillis() - start;
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal("§a[LingLens] 实体统计缓存重建完成，耗时 "
+                                    + elapsed + " ms，当前状态: READY"),
+                            true);
+                    LOGGER.info("[LingLens] 手动触发实体缓存重建，耗时 {} ms", elapsed);
+                    return 1;
+                }));
+        // /linglens entity setdirty —— 手动设脏，使缓存失效（需要 OP 权限）
+        entityCommand.then(Commands.literal("setdirty")
+                .requires(src -> src.hasPermission(4))
+                .executes(ctx -> {
+                    EntityStatsCache cache = EntityStatsCache.getInstance();
+                    cache.setDirty("管理员手动设脏");
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal("§e[LingLens] 实体统计缓存已手动设为 DIRTY（下次查询将自动重建）"),
+                            true);
+                    return 1;
+                }));
+
+        // /linglens entity status —— 查看缓存状态（需要 OP 权限）
+        entityCommand.then(Commands.literal("status")
+                .requires(src -> src.hasPermission(4))
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    EntityStatsCache cache = EntityStatsCache.getInstance();
+                    EntityStatsCache.State state = cache.getState();
+                    long lastUpdate = cache.getLastUpdateTime();
+                    long cachedTotal = cache.getCachedGlobalTotal();
+
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("§6=== [LingLens] 实体统计缓存状态 ===\n");
+                    sb.append("§f当前状态: §").append(getStateColor(state)).append(state.name()).append("\n");
+                    sb.append("§f缓存全局总数: §")
+                            .append(cachedTotal >= 0 ? "f" + cachedTotal : "cN/A(未初始化)")
+                            .append("\n");
+                    sb.append("§f上次更新时间: §f")
+                            .append(lastUpdate > 0 ? formatTimestamp(lastUpdate) : "§c从未")
+                            .append("\n");
+                    if (state == EntityStatsCache.State.READY) {
+                        long dimCount = 0; for (var ignored : server.getAllLevels()) dimCount++; sb.append("§f已加载维度数量: §a").append(dimCount).append("\n");
+                    }
+                    sb.append("§e使用 /linglens entity 查询完整统计");
+
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal(sb.toString()),
+                            false);
+                    return 1;
+                }));
+
+        root.then(entityCommand);
+
         dispatcher.register(root);
         LOGGER.info("[LingLens] 命令已注册(Command registered)");
+    }
+
+    // ==================== 格式化辅助方法 ====================
+
+    /**
+     * 根据缓存状态返回对应的 Minecraft 聊天颜色代码。
+     */
+    private static String getStateColor(EntityStatsCache.State state) {
+        switch (state) {
+            case READY:      return "a"; // 绿色
+            case DIRTY:      return "e"; // 黄色
+            case REBUILDING: return "6"; // 金色
+            case UNINIT:     return "c"; // 红色
+            default:         return "f"; // 白色
+        }
+    }
+
+    /**
+     * 格式化时间戳为可读的日期时间字符串。
+     *
+     * @param timestamp 毫秒时间戳
+     * @return 形如 "2024-01-15 14:30:25" 的字符串
+     */
+    private static String formatTimestamp(long timestamp) {
+        if (timestamp <= 0) return "N/A";
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        return sdf.format(new Date(timestamp));
     }
 
     public static String getFormatGamemsg(MinecraftServer server, PerformanceResult gameResult) {

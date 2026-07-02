@@ -1,7 +1,7 @@
 ---
 description: Entity quantity query and statistics
 ---
-
+# **注意！** **禁止直接使用本篇的代码**
 功能四：实体数量查询与统计（混合模式）
 1. 功能定义（不变）
 统计维度	说明
