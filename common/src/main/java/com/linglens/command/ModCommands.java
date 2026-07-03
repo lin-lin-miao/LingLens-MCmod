@@ -31,19 +31,25 @@ import java.text.MessageFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import com.linglens.player.PlayerInfo;
+import com.linglens.player.PlayerInfoQuery;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
  * 灵棱枢 (LingLens) 命令注册与处理类。
- * 包含三个命令组：
+ * 包含五个命令组：
  * <ul>
- *   <li>offline-tp — 离线玩家位置修改</li>
- *   <li>perf — 游戏/系统性能查询</li>
- *   <li>entity — 实体数量查询与统计</li>
+ * <li>offline-tp — 离线玩家位置修改</li>
+ * <li>perf — 游戏/系统性能查询</li>
+ * <li>entity — 实体数量查询与统计</li>
+ * <li>players — 在线玩家列表概要</li>
+ * <li>player — 单个玩家详细信息查询</li>
  * </ul>
  */
 public class ModCommands {
@@ -63,29 +69,27 @@ public class ModCommands {
         // ========== offline-tp 命令组 ==========
         LiteralArgumentBuilder<CommandSourceStack> offline_tp = Commands.literal("offline-tp");
 
-        {
-            offline_tp.requires(src -> src.hasPermission(4))
-                    .then(Commands.argument("player", StringArgumentType.word())
-                            .suggests(PLAYER_SUGGESTIONS)
-                            // 仅玩家名 → 主世界出生点
-                            .executes(ctx -> handleOfflineTp(ctx, null,
-                                    Level.OVERWORLD.location().toString()))
-                            .then(Commands.argument("location", Vec3Argument.vec3())
-                                    .executes(ctx -> {
-                                        Vec3 pos = Vec3Argument.getVec3(ctx, "location");
-                                        return handleOfflineTp(ctx, pos,
-                                                Level.OVERWORLD.location().toString());
-                                    })
-                                    .then(Commands
-                                            .argument("dimension", DimensionArgument.dimension())
-                                            .executes(ctx -> {
-                                                Vec3 pos = Vec3Argument.getVec3(ctx, "location");
-                                                ResourceLocation dimId = DimensionArgument
-                                                        .getDimension(ctx, "dimension").dimension()
-                                                        .location();
-                                                return handleOfflineTp(ctx, pos, dimId.toString());
-                                            }))));
-        }
+        offline_tp.requires(src -> src.hasPermission(4))
+                .then(Commands.argument("player", StringArgumentType.word())
+                        .suggests(PLAYER_SUGGESTIONS)
+                        // 仅玩家名 → 主世界出生点
+                        .executes(ctx -> handleOfflineTp(ctx, null,
+                                Level.OVERWORLD.location().toString()))
+                        .then(Commands.argument("location", Vec3Argument.vec3())
+                                .executes(ctx -> {
+                                    Vec3 pos = Vec3Argument.getVec3(ctx, "location");
+                                    return handleOfflineTp(ctx, pos,
+                                            Level.OVERWORLD.location().toString());
+                                })
+                                .then(Commands
+                                        .argument("dimension", DimensionArgument.dimension())
+                                        .executes(ctx -> {
+                                            Vec3 pos = Vec3Argument.getVec3(ctx, "location");
+                                            ResourceLocation dimId = DimensionArgument
+                                                    .getDimension(ctx, "dimension").dimension()
+                                                    .location();
+                                            return handleOfflineTp(ctx, pos, dimId.toString());
+                                        }))));
         root.then(offline_tp);
 
         // ========== perf 命令组 ==========
@@ -201,7 +205,10 @@ public class ModCommands {
                             .append(lastUpdate > 0 ? formatTimestamp(lastUpdate) : "§c从未")
                             .append("\n");
                     if (state == EntityStatsCache.State.READY) {
-                        long dimCount = 0; for (var ignored : server.getAllLevels()) dimCount++; sb.append("§f已加载维度数量: §a").append(dimCount).append("\n");
+                        long dimCount = 0;
+                        for (var ignored : server.getAllLevels())
+                            dimCount++;
+                        sb.append("§f已加载维度数量: §a").append(dimCount).append("\n");
                     }
                     sb.append("§e使用 /linglens entity 查询完整统计");
 
@@ -212,6 +219,16 @@ public class ModCommands {
                 }));
 
         root.then(entityCommand);
+
+        // ========== players 命令（在线玩家列表概要） ==========
+        LiteralArgumentBuilder<CommandSourceStack> playersCommand = Commands.literal("players");
+        playersCommand.executes(ModCommands::executePlayersList);
+        // ========== player 命令（单个玩家详细信息） ==========
+        playersCommand.then(Commands.argument("name", StringArgumentType.word())
+                .requires(src -> src.hasPermission(4))
+                .suggests(PLAYER_SUGGESTIONS)
+                .executes(ModCommands::executePlayerDetail));
+        root.then(playersCommand);
 
         dispatcher.register(root);
         LOGGER.info("[LingLens] 命令已注册(Command registered)");
@@ -224,11 +241,16 @@ public class ModCommands {
      */
     private static String getStateColor(EntityStatsCache.State state) {
         switch (state) {
-            case READY:      return "a"; // 绿色
-            case DIRTY:      return "e"; // 黄色
-            case REBUILDING: return "6"; // 金色
-            case UNINIT:     return "c"; // 红色
-            default:         return "f"; // 白色
+            case READY:
+                return "a"; // 绿色
+            case DIRTY:
+                return "e"; // 黄色
+            case REBUILDING:
+                return "6"; // 金色
+            case UNINIT:
+                return "c"; // 红色
+            default:
+                return "f"; // 白色
         }
     }
 
@@ -239,7 +261,8 @@ public class ModCommands {
      * @return 形如 "2024-01-15 14:30:25" 的字符串
      */
     private static String formatTimestamp(long timestamp) {
-        if (timestamp <= 0) return "N/A";
+        if (timestamp <= 0)
+            return "N/A";
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
         return sdf.format(new Date(timestamp));
     }
@@ -304,6 +327,83 @@ public class ModCommands {
         return sysmsg;
     }
 
+    // ==================== 在线玩家信息查询命令 ====================
+
+    /**
+     * 执行 /linglens players 命令。
+     * <p>
+     * 列出所有在线玩家的概要信息，包括名称、维度、坐标、生命值、在线时长和延迟。
+     * 按玩家名称排序。
+     * </p>
+     *
+     * @param ctx 命令上下文
+     * @return 命令执行结果码（1=成功，0=失败）
+     */
+    private static int executePlayersList(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            MinecraftServer server = source.getServer();
+            List<PlayerInfo> playerInfos = PlayerInfoQuery.collectAllOnlinePlayers(server);
+            int maxPlayers = server.getPlayerList().getMaxPlayers();
+
+            List<Component> messages = PlayerInfoQuery.buildPlayerListMessage(playerInfos, maxPlayers);
+            for (Component msg : messages) {
+                source.sendSuccess(() -> msg, false);
+            }
+
+            LOGGER.info("[LingLens] 已执行在线玩家列表查询，当前在线 {} 人", playerInfos.size());
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("查询在线玩家列表失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 查询在线玩家列表异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens players <name> 命令。
+     * <p>
+     * 查询单个玩家的详细信息，包括 UUID、位置、维度、生命值、饥饿值、经验等级、
+     * 在线时长、延迟和游戏模式。
+     * 如果玩家不在线，返回错误提示。
+     * </p>
+     *
+     * @param ctx 命令上下文，包含 "name" 参数
+     * @return 命令执行结果码（1=成功，0=失败/玩家不在线）
+     */
+    private static int executePlayerDetail(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            String playerName = StringArgumentType.getString(ctx, "name");
+            MinecraftServer server = source.getServer();
+
+            ServerPlayer targetPlayer = PlayerInfoQuery.findPlayerByName(server, playerName);
+            if (targetPlayer == null) {
+                source.sendFailure(PlayerInfoQuery.buildPlayerNotFoundMessage(playerName));
+                LOGGER.warn("[LingLens] 查询玩家详细信息失败: {} 不在线", playerName);
+                return 0;
+            }
+
+            PlayerInfo info = PlayerInfoQuery.collectPlayerInfo(targetPlayer);
+            if (info == null) {
+                source.sendFailure(Component.literal("采集玩家信息时发生错误"));
+                return 0;
+            }
+
+            List<Component> messages = PlayerInfoQuery.buildPlayerDetailMessage(info);
+            for (Component msg : messages) {
+                source.sendSuccess(() -> msg, false);
+            }
+
+            LOGGER.info("[LingLens] 已查询玩家 {} 的详细信息", playerName);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("查询玩家详细信息失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 查询玩家详细信息异常: ", e);
+            return 0;
+        }
+    }
+
     /**
      * 处理离线传送命令的核心逻辑。
      * 
@@ -357,3 +457,4 @@ public class ModCommands {
         return 1;
     }
 }
+

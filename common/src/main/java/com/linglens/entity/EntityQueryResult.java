@@ -37,7 +37,7 @@ public class EntityQueryResult {
                 StringBuilder sb = new StringBuilder();
 
                 // 标题
-                sb.append("§e=== 灵棱枢 实体统计");
+                sb.append("§e=== [LingLens] 实体统计");
                 if (fromCache) {
                     sb.append(" §7(缓存)§e");
                 } else {
@@ -56,12 +56,12 @@ public class EntityQueryResult {
                     }
                 }
                 if (!globalCatCounts.isEmpty()) {
-                    sb.append("\n§7全局类别分布:\n");
+                    sb.append("§7全局类别分布:\n");
                     globalCatCounts.entrySet().stream()
                             .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
                             .forEach(catEntry -> {
                                 String catName = getCategoryDisplayName(catEntry.getKey());
-                                sb.append("    §7- ").append(catName).append(": §f").append(catEntry.getValue()).append("\n");
+                                sb.append("  §7- ").append(catName).append(": §f").append(catEntry.getValue()).append("\n");
                             });
                 }
 
@@ -73,13 +73,13 @@ public class EntityQueryResult {
                     }
                 }
                 if (!globalTypeCounts.isEmpty()) {
-                    sb.append("  §8└ 主要类型:\n");
+                    sb.append("  §7└ §f主要类型:\n");
                     globalTypeCounts.entrySet().stream()
                             .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
                             .limit(8)
                             .forEach(typeEntry -> {
                                 String typeName = typeEntry.getKey().replace("minecraft:", "");
-                                sb.append("  §7- §f").append(typeName)
+                                sb.append("    §7- §f").append(typeName)
                                         .append(" §7× ").append(typeEntry.getValue()).append("\n");
                             });
                     if (globalTypeCounts.size() > 8) {
@@ -94,11 +94,11 @@ public class EntityQueryResult {
                         .toList();
 
                 if (!sortedDimensions.isEmpty()) {
-                    sb.append("\n§7维度概览 (Top 5):\n");
+                    sb.append("§7维度概览 (Top 5):\n");
                     int limit = Math.min(5, sortedDimensions.size());
                     for (int i = 0; i < limit; i++) {
                         Map.Entry<String, Long> entry = sortedDimensions.get(i);
-                        String dimName = entry.getKey().replace("minecraft:", "");
+                        String dimName = entry.getKey();
                         sb.append("§6▸ §b").append(dimName).append(" §7: §f").append(entry.getValue()).append(" 个实体\n");
                     }
                     int remaining = sortedDimensions.size() - limit;
