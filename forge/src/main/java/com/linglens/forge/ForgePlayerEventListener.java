@@ -1,7 +1,9 @@
 package com.linglens.forge;
 
+import com.linglens.manager.IdleTickManager;
 import com.linglens.player.PlayerInfoQuery;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
@@ -59,4 +61,22 @@ public final class ForgePlayerEventListener {
             LOGGER.debug("[LingLens] Forge 玩家 {} 登出，已记录在线时长", player.getGameProfile().getName());
         }
     }
+
+    /**
+     * 服务器 tick 事件处理（自动保存）。
+     * <p>
+     * 在服务器 tick 结束时调用 {@link PlayerInfoQuery#onServerTick()}，
+     * 实现每 60 秒自动保存在线时长数据。
+     * </p>
+     *
+     * @param event 服务器 tick 事件
+     */
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase == TickEvent.Phase.END) {
+            IdleTickManager.onTickEnd(event.getServer());
+        }
+    }
+
+
 }

@@ -2,6 +2,7 @@ package com.linglens.forge;
 
 import com.linglens.LingLensModMain;
 import com.linglens.command.ModCommands;
+import com.linglens.manager.IdleTickManager;
 import com.linglens.manager.TeleportManager;
 import com.linglens.player.PlayerInfoQuery;
 import net.minecraft.server.MinecraftServer;
@@ -33,6 +34,8 @@ public final class LingLensModMainForge {
         // LevelResource.ROOT 对应存档根目录
         PlayerInfoQuery.setDataFile(server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toFile());
         PlayerInfoQuery.loadFromFile();
+
+        IdleTickManager.scanPendingIfNeeded();
     }
 
     @SubscribeEvent

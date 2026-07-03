@@ -8,6 +8,7 @@ import net.minecraft.world.level.storage.LevelResource;
 import com.linglens.LingLensModMain;
 import com.linglens.command.ModCommands;
 import com.linglens.manager.TeleportManager;
+import com.linglens.manager.IdleTickManager;  // 添加导入
 import com.linglens.player.PlayerInfoQuery;
 
 public final class LingLensModMainFabric implements ModInitializer {
@@ -29,6 +30,7 @@ public final class LingLensModMainFabric implements ModInitializer {
             // 设置玩家在线时长持久化路径（存档目录下的 linglens/playtime.json）
             PlayerInfoQuery.setDataFile(server.getWorldPath(LevelResource.ROOT).toFile());
             PlayerInfoQuery.loadFromFile();
+            IdleTickManager.scanPendingIfNeeded();
         });
 
         // 服务器停止时：保存待传送数据 与 玩家在线时长

@@ -3,6 +3,9 @@ package com.linglens.player;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
+import com.linglens.annotation.IdleTickSave;
+import com.linglens.manager.IdleTickManager;
+
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -29,25 +32,31 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <h3>数据采集来源</h3>
  * <ul>
- *   <li>玩家名称: {@code ServerPlayer.getGameProfile().getName()}</li>
- *   <li>UUID: {@code ServerPlayer.getUUID()}</li>
- *   <li>在线时长: {@code System.currentTimeMillis() - 登录时间戳}</li>
- *   <li>当前位置: {@code ServerPlayer.position()}</li>
- *   <li>当前维度: {@code ServerPlayer.level().dimension().location()}</li>
- *   <li>生命值: {@code ServerPlayer.getHealth()}</li>
- *   <li>最大生命值: {@code ServerPlayer.getMaxHealth()}</li>
- *   <li>盔甲值: {@code ServerPlayer.getArmorValue()}</li>
- *   <li>饥饿值: {@code ServerPlayer.getFoodData().getFoodLevel()}</li>
- *   <li>饱和浓度: {@code ServerPlayer.getFoodData().getSaturationLevel()}</li>
- *   <li>经验等级: {@code ServerPlayer.experienceLevel}</li>
- *   <li>经验进度: {@code ServerPlayer.experienceProgress}</li>
- *   <li>游戏模式: {@code ServerPlayer.gameMode.getGameModeForPlayer()}</li>
- *   <li>延迟(Ping): {@code ServerPlayer.latency}</li>
+ * <li>玩家名称: {@code ServerPlayer.getGameProfile().getName()}</li>
+ * <li>UUID: {@code ServerPlayer.getUUID()}</li>
+ * <li>在线时长: {@code System.currentTimeMillis() - 登录时间戳}</li>
+ * <li>当前位置: {@code ServerPlayer.position()}</li>
+ * <li>当前维度: {@code ServerPlayer.level().dimension().location()}</li>
+ * <li>生命值: {@code ServerPlayer.getHealth()}</li>
+ * <li>最大生命值: {@code ServerPlayer.getMaxHealth()}</li>
+ * <li>盔甲值: {@code ServerPlayer.getArmorValue()}</li>
+ * <li>饥饿值: {@code ServerPlayer.getFoodData().getFoodLevel()}</li>
+ * <li>饱和浓度: {@code ServerPlayer.getFoodData().getSaturationLevel()}</li>
+ * <li>经验等级: {@code ServerPlayer.experienceLevel}</li>
+ * <li>经验进度: {@code ServerPlayer.experienceProgress}</li>
+ * <li>游戏模式: {@code ServerPlayer.gameMode.getGameModeForPlayer()}</li>
+ * <li>延迟(Ping): {@code ServerPlayer.latency}</li>
  * </ul>
  */
 public final class PlayerInfoQuery {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("LingLens");
+
+    /**
+     * 脏标记，记录数据是否已被修改（玩家登录/登出）。
+     * 用于避免无数据变更时重复保存文件。
+     */
+    private static boolean dirty = false;
 
     /**
      * 存储玩家UUID {@literal ->} 本次登录时间戳（毫秒）的映射。
@@ -79,6 +88,7 @@ public final class PlayerInfoQuery {
      * 应在服务器启动时由各平台主类调用，传入世界存档目录，
      * 例如 {@code new File(worldDirectory, "linglens/playtime.json")}。
      * </p>
+     * 
      * @param worldDirectory 世界存档目录（可由 MinecraftServer.getWorldPath 或存储目录获取）
      */
     public static void setDataFile(File worldDirectory) {
@@ -98,7 +108,8 @@ public final class PlayerInfoQuery {
             return;
         }
         try (Reader reader = new FileReader(dataFile)) {
-            Type type = new TypeToken<Map<String, Long>>() {}.getType();
+            Type type = new TypeToken<Map<String, Long>>() {
+            }.getType();
             Map<String, Long> raw = GSON.fromJson(reader, type);
             if (raw != null) {
                 totalPlayTime.clear();
@@ -117,26 +128,53 @@ public final class PlayerInfoQuery {
         }
     }
 
+    static {
+        // 注册本类到待扫描列表，等待服务器启动后由 IdleTickManager 自动扫描注解
+        IdleTickManager.registerPendingClass(PlayerInfoQuery.class);
+    }
+
     /**
      * 将历史在线时长数据保存到存档文件夹。
      * <p>
-
-     * 应在世界存档保存时（如自动保存、手动保存、服务器关闭前）调用，确保数据不会丢失。
-     * 由各平台的事件监听器在存档保存事件触发时调用。
+     * 保存策略：
+     * <ul>
+     * <li>服务器停止时手动调用</li>
+     * <li>定时自动保存（每 60 秒由 {@link #IdleTickSave()} 触发）</li>
+     * </ul>
+     * 注意：保存时会强制将当前在线玩家的 session 时间加入累计值，防止 auto-save 丢失数据。
      * </p>
      */
+    @IdleTickSave
     public static void saveToFile() {
         if (dataFile == null) {
+            LOGGER.error("[LingLens] 保存玩家在线时长数据失败: 无保存位置");
+            return;
+        }
+        // 若没有数据变动且没有在线玩家，跳过保存；有在线玩家时强制保存（保证在线时长实时持久化）
+        if (!dirty && loginTimestamps.isEmpty()) {
             return;
         }
         dataFile.getParentFile().mkdirs();
         try (Writer writer = new FileWriter(dataFile)) {
             Map<String, Long> raw = new HashMap<>();
-            for (Map.Entry<UUID, Long> entry : totalPlayTime.entrySet()) {
-                raw.put(entry.getKey().toString(), entry.getValue());
+            long now = System.currentTimeMillis();
+            // 合并 totalPlayTime 与 loginTimestamps（在线玩家）
+            Set<UUID> allUuids = new HashSet<>();
+            allUuids.addAll(totalPlayTime.keySet());
+            allUuids.addAll(loginTimestamps.keySet());
+            for (UUID uuid : allUuids) {
+                long accumulated = totalPlayTime.getOrDefault(uuid, 0L);
+                Long loginTime = loginTimestamps.get(uuid);
+                if (loginTime != null) {
+                    // 玩家当前在线，计算本次 session 时长并累加
+                    long sessionDuration = (now - loginTime) / 1000;
+                    accumulated += sessionDuration;
+                }
+                raw.put(uuid.toString(), accumulated);
             }
             GSON.toJson(raw, writer);
-            LOGGER.info("[LingLens] 玩家在线时长数据已保存，共 {} 条记录", raw.size());
+            dirty = false;
+            LOGGER.debug("[LingLens] 玩家在线时长数据已保存（含在线玩家 session），共 {} 条记录", raw.size());
         } catch (Exception e) {
             LOGGER.error("[LingLens] 保存玩家在线时长数据失败: ", e);
         }
@@ -175,6 +213,7 @@ public final class PlayerInfoQuery {
         if (loginTime != null) {
             long sessionDuration = (System.currentTimeMillis() - loginTime) / 1000;
             totalPlayTime.merge(playerUUID, sessionDuration, Long::sum);
+            dirty = true; // 数据发生变更
             LOGGER.debug("[LingLens] 记录玩家登出: UUID={}, 本次在线={}s", playerUUID, sessionDuration);
         }
     }
@@ -254,11 +293,10 @@ public final class PlayerInfoQuery {
             long totalTime = getTotalPlayTime(playerUuid);
 
             return new PlayerInfo(
-                name, uuid, position, dimension,
-                health, maxHealth, armorValue, foodLevel, saturation,
-                expLevel, expProgress, gameMode,
-                latency, sessionTime, totalTime
-            );
+                    name, uuid, position, dimension,
+                    health, maxHealth, armorValue, foodLevel, saturation,
+                    expLevel, expProgress, gameMode,
+                    latency, sessionTime, totalTime);
         } catch (Exception e) {
             LOGGER.error("[LingLens] 采集玩家信息时发生错误: {}", e.getMessage());
             return null;
@@ -293,6 +331,7 @@ public final class PlayerInfoQuery {
      * 构建在线玩家概要列表消息。
      * <p>
      * 格式示例：
+     * 
      * <pre>
      * === 在线玩家列表 (3 / 20) ===
      * 1. Alice [overworld] 123.1, 64.0, -45.5 | HP: 20.0/20.0 | 盔甲: 10
@@ -311,11 +350,11 @@ public final class PlayerInfoQuery {
 
         // 标题行
         MutableComponent title = Component.literal("=== 在线玩家列表 (")
-            .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)
-            .append(Component.literal(String.valueOf(infoList.size())).withStyle(ChatFormatting.YELLOW))
-            .append(Component.literal(" / ").withStyle(ChatFormatting.GOLD))
-            .append(Component.literal(String.valueOf(maxPlayers)).withStyle(ChatFormatting.YELLOW))
-            .append(Component.literal(") ===").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+                .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)
+                .append(Component.literal(String.valueOf(infoList.size())).withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal(" / ").withStyle(ChatFormatting.GOLD))
+                .append(Component.literal(String.valueOf(maxPlayers)).withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal(") ===").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
         messages.add(title);
 
         if (infoList.isEmpty()) {
@@ -356,11 +395,11 @@ public final class PlayerInfoQuery {
 
         // 维度
         line.append(Component.literal(" [" + info.getDimensionShortName() + "]")
-            .withStyle(Style.EMPTY.withColor(ChatFormatting.DARK_AQUA)));
+                .withStyle(Style.EMPTY.withColor(ChatFormatting.DARK_AQUA)));
 
         // 坐标
         // line.append(Component.literal(" " + info.getPositionString())
-        //     .withStyle(Style.EMPTY.withColor(ChatFormatting.YELLOW)));
+        // .withStyle(Style.EMPTY.withColor(ChatFormatting.YELLOW)));
 
         // 分隔符
         line.append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY));
@@ -374,7 +413,8 @@ public final class PlayerInfoQuery {
         line.append(Component.literal("盔甲: ").withStyle(ChatFormatting.GRAY));
         String armorStr = info.getArmorString();
         int armorVal = info.armorValue();
-        line.append(Component.literal(armorStr).withStyle(armorVal >= 10 ? ChatFormatting.GREEN : (armorVal >= 5 ? ChatFormatting.YELLOW : ChatFormatting.GOLD)));
+        line.append(Component.literal(armorStr).withStyle(
+                armorVal >= 10 ? ChatFormatting.GREEN : (armorVal >= 5 ? ChatFormatting.YELLOW : ChatFormatting.GOLD)));
 
         // 换行 + 缩进显示在线时长和延迟（第二行）
         MutableComponent secondLine = Component.literal("    ");
@@ -387,14 +427,14 @@ public final class PlayerInfoQuery {
         long sessionSec = info.sessionTimeSeconds();
         if (sessionSec > 60) {
             secondLine.append(Component.literal(" (+" + info.getSessionTimeString() + ")")
-                .withStyle(ChatFormatting.DARK_GREEN));
+                    .withStyle(ChatFormatting.DARK_GREEN));
         }
 
         // 延迟
         secondLine.append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY));
         secondLine.append(Component.literal("延迟: ").withStyle(ChatFormatting.GRAY));
         secondLine.append(Component.literal(info.latency() + "ms")
-            .withStyle(getLatencyColor(info.latency())));
+                .withStyle(getLatencyColor(info.latency())));
         line.append(Component.literal("\n"));
         line.append(secondLine);
         return line;
@@ -404,6 +444,7 @@ public final class PlayerInfoQuery {
      * 构建单个玩家的详细信息消息。
      * <p>
      * 格式示例：
+     * 
      * <pre>
      * === 玩家详细信息: Alice ===
      * UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -422,57 +463,58 @@ public final class PlayerInfoQuery {
 
         // 标题
         MutableComponent title = Component.literal("=== 玩家详细信息: ")
-            .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)
-            .append(Component.literal(info.name()).withStyle(ChatFormatting.AQUA))
-            .append(Component.literal(" ===").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+                .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)
+                .append(Component.literal(info.name()).withStyle(ChatFormatting.AQUA))
+                .append(Component.literal(" ===").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
         messages.add(title);
 
         // UUID
         MutableComponent uuidLine = Component.literal("")
-            .append(Component.literal("UUID: ").withStyle(ChatFormatting.GRAY))
-            .append(Component.literal(info.uuid()).withStyle(ChatFormatting.WHITE));
+                .append(Component.literal("UUID: ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(info.uuid()).withStyle(ChatFormatting.WHITE));
         messages.add(uuidLine);
 
         // 位置与维度
         MutableComponent posLine = Component.literal("")
-            .append(Component.literal("位置: ").withStyle(ChatFormatting.GRAY))
-            .append(Component.literal(info.getPositionString()).withStyle(ChatFormatting.YELLOW))
-            .append(Component.literal(" [" + info.getDimensionShortName() + "]").withStyle(ChatFormatting.DARK_AQUA));
+                .append(Component.literal("位置: ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(info.getPositionString()).withStyle(ChatFormatting.YELLOW))
+                .append(Component.literal(" [" + info.getDimensionShortName() + "]")
+                        .withStyle(ChatFormatting.DARK_AQUA));
         messages.add(posLine);
 
         // 状态：生命值、盔甲、饥饿值、经验
         MutableComponent statusLine = Component.literal("")
-            .append(Component.literal("状态: ").withStyle(ChatFormatting.GRAY))
-            .append(Component.literal("HP ").withStyle(ChatFormatting.RED))
-            .append(Component.literal(info.getHealthString()).withStyle(ChatFormatting.WHITE))
-            .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
-            .append(Component.literal("盔甲 ").withStyle(ChatFormatting.BLUE))
-            .append(Component.literal(info.getArmorString()).withStyle(ChatFormatting.WHITE))
-            .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
-            .append(Component.literal("饥饿 ").withStyle(ChatFormatting.GOLD))
-            .append(Component.literal(info.getFoodString()).withStyle(ChatFormatting.WHITE))
-            .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
-            .append(Component.literal("等级 ").withStyle(ChatFormatting.LIGHT_PURPLE))
-            .append(Component.literal(String.valueOf(info.experienceLevel())).withStyle(ChatFormatting.WHITE))
-            .append(Component.literal(" (" + (int) (info.experienceProgress() * 100) + "%)")
-                .withStyle(ChatFormatting.GRAY));
+                .append(Component.literal("状态: ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal("HP ").withStyle(ChatFormatting.RED))
+                .append(Component.literal(info.getHealthString()).withStyle(ChatFormatting.WHITE))
+                .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Component.literal("盔甲 ").withStyle(ChatFormatting.BLUE))
+                .append(Component.literal(info.getArmorString()).withStyle(ChatFormatting.WHITE))
+                .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Component.literal("饥饿 ").withStyle(ChatFormatting.GOLD))
+                .append(Component.literal(info.getFoodString()).withStyle(ChatFormatting.WHITE))
+                .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Component.literal("等级 ").withStyle(ChatFormatting.LIGHT_PURPLE))
+                .append(Component.literal(String.valueOf(info.experienceLevel())).withStyle(ChatFormatting.WHITE))
+                .append(Component.literal(" (" + (int) (info.experienceProgress() * 100) + "%)")
+                        .withStyle(ChatFormatting.GRAY));
         messages.add(statusLine);
 
         // 在线时长
         MutableComponent timeLine = Component.literal("")
-            .append(Component.literal("在线: ").withStyle(ChatFormatting.GRAY))
-            .append(Component.literal("总 " + info.getTotalTimeString()).withStyle(ChatFormatting.GREEN))
-            .append(Component.literal(" (本次 " + info.getSessionTimeString() + ")")
-                .withStyle(ChatFormatting.DARK_GREEN));
+                .append(Component.literal("在线: ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal("总 " + info.getTotalTimeString()).withStyle(ChatFormatting.GREEN))
+                .append(Component.literal(" (本次 " + info.getSessionTimeString() + ")")
+                        .withStyle(ChatFormatting.DARK_GREEN));
         messages.add(timeLine);
 
         // 延迟与游戏模式
         MutableComponent miscLine = Component.literal("")
-            .append(Component.literal("延迟: ").withStyle(ChatFormatting.GRAY))
-            .append(Component.literal(info.latency() + "ms").withStyle(getLatencyColor(info.latency())))
-            .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
-            .append(Component.literal("模式: ").withStyle(ChatFormatting.GRAY))
-            .append(Component.literal(info.gameMode()).withStyle(getGameModeColor(info.gameMode())));
+                .append(Component.literal("延迟: ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(info.latency() + "ms").withStyle(getLatencyColor(info.latency())))
+                .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
+                .append(Component.literal("模式: ").withStyle(ChatFormatting.GRAY))
+                .append(Component.literal(info.gameMode()).withStyle(getGameModeColor(info.gameMode())));
         messages.add(miscLine);
 
         return messages;
@@ -486,7 +528,7 @@ public final class PlayerInfoQuery {
      */
     public static Component buildPlayerNotFoundMessage(String playerName) {
         return Component.literal("玩家 \"" + playerName + "\" 不在线或不存在")
-            .withStyle(ChatFormatting.RED);
+                .withStyle(ChatFormatting.RED);
     }
 
     // ==================== 辅助方法 ====================
@@ -494,10 +536,10 @@ public final class PlayerInfoQuery {
     /**
      * 根据延迟值返回对应的聊天颜色。
      * <ul>
-     *   <li>{@code <= 50ms} - 绿色（良好）</li>
-     *   <li>{@code <= 100ms} - 黄色（一般）</li>
-     *   <li>{@code <= 200ms} - 金色（较差）</li>
-     *   <li>{@code > 200ms} - 红色（很差）</li>
+     * <li>{@code <= 50ms} - 绿色（良好）</li>
+     * <li>{@code <= 100ms} - 黄色（一般）</li>
+     * <li>{@code <= 200ms} - 金色（较差）</li>
+     * <li>{@code > 200ms} - 红色（很差）</li>
      * </ul>
      *
      * @param latency 延迟（毫秒）
@@ -518,10 +560,10 @@ public final class PlayerInfoQuery {
     /**
      * 根据游戏模式返回对应的聊天颜色。
      * <ul>
-     *   <li>survival - 绿色</li>
-     *   <li>creative - 淡紫色</li>
-     *   <li>adventure - 金色</li>
-     *   <li>spectator - 灰色</li>
+     * <li>survival - 绿色</li>
+     * <li>creative - 淡紫色</li>
+     * <li>adventure - 金色</li>
+     * <li>spectator - 灰色</li>
      * </ul>
      *
      * @param gameMode 游戏模式名称（不区分大小写）

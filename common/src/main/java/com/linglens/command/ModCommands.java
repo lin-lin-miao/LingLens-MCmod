@@ -351,7 +351,7 @@ public class ModCommands {
                 source.sendSuccess(() -> msg, false);
             }
 
-            LOGGER.info("[LingLens] 已执行在线玩家列表查询，当前在线 {} 人", playerInfos.size());
+            LOGGER.debug("[LingLens] 已执行在线玩家列表查询，当前在线 {} 人", playerInfos.size());
             return 1;
         } catch (Exception e) {
             source.sendFailure(Component.literal("查询在线玩家列表失败: " + e.getMessage()));

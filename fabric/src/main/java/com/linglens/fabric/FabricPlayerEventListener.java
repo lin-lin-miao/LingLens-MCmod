@@ -1,7 +1,9 @@
  package com.linglens.fabric;
 
+import com.linglens.manager.IdleTickManager;
 import com.linglens.player.PlayerInfoQuery;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.server.level.ServerPlayer;
 import org.slf4j.Logger;
@@ -48,6 +50,11 @@ public final class FabricPlayerEventListener {
             }
         });
 
-        LOGGER.debug("[LingLens] Fabric 玩家事件监听器已注册");
+        // 服务器tick - 定时自动保存玩家在线时长数据（每 60 秒）
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            IdleTickManager.onTickEnd(server);
+        });
+
+        LOGGER.debug("[LingLens] Fabric 玩家事件监听器及定时保存已注册");
     }
 }
