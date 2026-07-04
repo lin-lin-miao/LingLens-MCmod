@@ -6,6 +6,7 @@ import com.linglens.manager.TeleportManager;
 import com.linglens.performance.PerformanceQuery;
 import com.linglens.performance.SystemPerfResult;
 import com.linglens.performance.PerformanceResult;
+import com.linglens.chunk.ChunkQueryResult;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -17,9 +18,8 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -37,6 +37,12 @@ import java.util.UUID;
 
 import com.linglens.player.PlayerInfo;
 import com.linglens.player.PlayerInfoQuery;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.ClickEvent;
+import net.minecraft.network.chat.HoverEvent;
+import net.minecraft.network.chat.Style;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.nbt.CompoundTag;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -128,16 +134,34 @@ public class ModCommands {
             sb.append("§e=== §6[LingLens] 综合性能总览 §e===\n");
             sb.append(getFormatSysmsg(sysResult));
             sb.append(getFormatGamemsg(server, gameResult));
-            // 实体性能
-            // 区块性能
+            // 区块总览
+            ChunkQueryResult chunkResult = ChunkQueryResult.queryAll(server);
+            sb.append("§6=== [ 区块加载 ] ===\n");
+            sb.append("§f总加载区块: §a").append(chunkResult.getTotalLoaded()).append("\n");
+            sb.append("§f强制加载区块: §a").append(chunkResult.getTotalForced()).append("\n");
+
             ctx.getSource().sendSuccess(() -> Component.literal(sb.toString()), false);
-            LOGGER.debug("[LingLens] 综合性能命令执行: TPS={}+{}, MSPT={}ms, CPU={}, 内存={:.2f}MB",
+            LOGGER.debug("[LingLens] 综合性能命令执行: TPS={}+{}, MSPT={}ms, CPU={}, 内存={:.2f}MB, 区块={}",
                     String.format("%.2f", gameResult.tps()), String.format("%.2f", gameResult.idletps()),
                     String.format("%.2f", gameResult.mspt()),
                     sysResult.cpuPercent() >= 0 ? String.format("%.2f%%", sysResult.cpuPercent()) : "N/A",
-                    sysResult.usedMemoryMB());
+                    sysResult.usedMemoryMB(),
+                    chunkResult.getTotalLoaded());
             return 1;
         });
+
+        // /linglens perf chunks —— 区块加载统计详情
+        perfCommand.then(Commands.literal("chunks")
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    ChunkQueryResult chunkResult = ChunkQueryResult.queryAll(server);
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal(chunkResult.toReadableString()),
+                            false);
+                    // LOGGER.info("[LingLens] 区块统计查询: 总加载={}, 总强制={}",
+                    // chunkResult.getTotalLoaded(), chunkResult.getTotalForced());
+                    return 1;
+                }));
 
         root.then(perfCommand);
 
@@ -300,11 +324,15 @@ public class ModCommands {
             gamemsg.append("§e各个维度MSPT(由大到小排序):\n");
             gameResult.dimensionMspt().entrySet().stream()
                     .sorted(Map.Entry.<String, Double>comparingByValue().reversed())
+                    .limit(8)
                     .forEach(entry -> {
                         String dimName = entry.getKey();
                         gamemsg.append("  §f").append(dimName).append(": §a")
                                 .append(String.format("%.2f", entry.getValue())).append(" ms\n");
                     });
+            if (gameResult.dimensionMspt().size() > 8) {
+                gamemsg.append("  §8... 及其他 ").append(gameResult.dimensionMspt().size() - 8).append(" 个维度\n");
+            }
         }
         return gamemsg.toString();
     }
@@ -364,7 +392,7 @@ public class ModCommands {
      * 执行 /linglens players <name> 命令。
      * <p>
      * 查询单个玩家的详细信息，包括 UUID、位置、维度、生命值、饥饿值、经验等级、
-     * 在线时长、延迟和游戏模式。
+     * 在线时长、延迟和游戏模式，以及装备信息（主手、副手、盔甲栏）。
      * 如果玩家不在线，返回错误提示。
      * </p>
      *
@@ -390,18 +418,99 @@ public class ModCommands {
                 return 0;
             }
 
+            // 合并所有基础消息为一条，一次性发送
             List<Component> messages = PlayerInfoQuery.buildPlayerDetailMessage(info);
-            for (Component msg : messages) {
-                source.sendSuccess(() -> msg, false);
+            MutableComponent detailMessage = Component.literal("");
+            for (int i = 0; i < messages.size(); i++) {
+                detailMessage.append(messages.get(i));
             }
+            detailMessage.append(Component.literal("\n"));
+            // 添加玩家装备信息（含主手、副手和盔甲）
+            detailMessage.append(buildEquipmentComponent(targetPlayer));
 
-            LOGGER.info("[LingLens] 已查询玩家 {} 的详细信息", playerName);
+            source.sendSuccess(() -> detailMessage, false);
+
+            LOGGER.debug("[LingLens] 已查询玩家 {} 的详细信息（含装备）", playerName);
             return 1;
         } catch (Exception e) {
             source.sendFailure(Component.literal("查询玩家详细信息失败: " + e.getMessage()));
             LOGGER.error("[LingLens] 查询玩家详细信息异常: ", e);
             return 0;
         }
+    }
+
+    // ==================== 装备信息辅助方法 ====================
+
+    /** 可交互物品栏位名称常量数组（与 getArmorSlots 顺序匹配） */
+    private static final String[] ARMOR_SLOT_NAMES = { "靴子", "护腿", "胸甲", "头盔" };
+
+    /**
+     * 构建玩家装备信息的可交互组件。
+     * <p>
+     * 包括主手、副手和盔甲栏物品，悬停可查看物品详情（SHOW_ITEM格式），
+     * 点击将对应的 /give 指令填入输入框（不自动执行）。
+     * 空物品显示灰色 "空"。
+     * </p>
+     *
+     * @param player 目标在线玩家
+     * @return 包含所有装备栏信息的 Component
+     */
+    private static Component buildEquipmentComponent(ServerPlayer player) {
+        ItemStack mainHand = player.getMainHandItem();
+        ItemStack offHand = player.getOffhandItem();
+        Iterable<ItemStack> armorSlots = player.getArmorSlots();
+
+        MutableComponent equip = Component.literal("§6=== 装备信息 ===\n");
+
+        // 主手
+        equip.append(buildSlotComponent("主手", mainHand)).append(Component.literal("\n"));
+        // 副手
+        equip.append(buildSlotComponent("副手", offHand)).append(Component.literal("\n"));
+
+        // 盔甲栏（getArmorSlots 返回顺序：脚→腿→胸→头）
+        // 转为列表方便索引
+        java.util.ArrayList<ItemStack> armorList = new java.util.ArrayList<>();
+        armorSlots.forEach(armorList::add);
+        for (int i = 0; i < armorList.size(); i++) {
+            equip.append(buildSlotComponent(ARMOR_SLOT_NAMES[i], armorList.get(i))).append(Component.literal("\n"));
+        }
+        return equip;
+    }
+
+    /**
+     * 构建单个物品栏位的可交互组件。
+     * <p>
+     * 空物品显示灰色 "空"；
+     * 非空物品显示名称和注册 ID，悬停时显示 MC 原版 SHOW_ITEM 提示框，
+     * 点击时将 /give 指令填入输入框（SUGGEST_COMMAND 便于玩家修改）。
+     * </p>
+     *
+     * @param slotName 栏位名称（如 "主手"、"头盔"）
+     * @param stack    该栏位中的物品栈
+     * @return 可交互的 Component
+     */
+    private static Component buildSlotComponent(String slotName, ItemStack stack) {
+        if (stack.isEmpty()) {
+            return Component.literal("§7" + slotName + ": 空");
+        }
+
+        ResourceLocation itemId = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        Component itemName = stack.getDisplayName();
+
+        // 构造带完整 NBT 的 /give 指令，确保点击获取时得到完全一致的物品（含附魔、自定义名称、 lore 等）
+        CompoundTag tag = stack.getTag();
+        String nbtString = "";
+        if (tag != null && !tag.isEmpty()) {
+            nbtString = tag.toString();
+        }
+        String suggestCommand = "/give @p " + itemId + nbtString + " " + stack.getCount();
+
+        return Component.literal("§e" + slotName + ": §f").append(itemName)
+                .append(Component.literal(" §7(" + itemId + ")")).append(Component.literal(" X"+stack.getCount()))
+                .setStyle(Style.EMPTY
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM,
+                                new HoverEvent.ItemStackInfo(stack)))
+                        .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, suggestCommand)));
     }
 
     /**
@@ -457,4 +566,3 @@ public class ModCommands {
         return 1;
     }
 }
-

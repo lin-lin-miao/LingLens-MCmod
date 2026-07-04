@@ -7,7 +7,9 @@ import com.linglens.annotation.IdleTickSave;
 import com.linglens.manager.IdleTickManager;
 
 import net.minecraft.ChatFormatting;
+import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.resources.ResourceLocation;
@@ -465,20 +467,22 @@ public final class PlayerInfoQuery {
         MutableComponent title = Component.literal("=== 玩家详细信息: ")
                 .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD)
                 .append(Component.literal(info.name()).withStyle(ChatFormatting.AQUA))
-                .append(Component.literal(" ===").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
+                .append(Component.literal(" ===\n").withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
         messages.add(title);
 
         // UUID
         MutableComponent uuidLine = Component.literal("")
                 .append(Component.literal("UUID: ").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(info.uuid()).withStyle(ChatFormatting.WHITE));
+                .append(Component.literal(info.uuid()+"\n").withStyle(ChatFormatting.WHITE))
+                .setStyle(Style.EMPTY.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, info.uuid()))
+                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("点击复制"))));
         messages.add(uuidLine);
 
         // 位置与维度
         MutableComponent posLine = Component.literal("")
                 .append(Component.literal("位置: ").withStyle(ChatFormatting.GRAY))
                 .append(Component.literal(info.getPositionString()).withStyle(ChatFormatting.YELLOW))
-                .append(Component.literal(" [" + info.getDimensionShortName() + "]")
+                .append(Component.literal(" [" + info.getDimensionShortName() + "]\n")
                         .withStyle(ChatFormatting.DARK_AQUA));
         messages.add(posLine);
 
@@ -496,7 +500,7 @@ public final class PlayerInfoQuery {
                 .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal("等级 ").withStyle(ChatFormatting.LIGHT_PURPLE))
                 .append(Component.literal(String.valueOf(info.experienceLevel())).withStyle(ChatFormatting.WHITE))
-                .append(Component.literal(" (" + (int) (info.experienceProgress() * 100) + "%)")
+                .append(Component.literal(" (" + (int) (info.experienceProgress() * 100) + "%)\n")
                         .withStyle(ChatFormatting.GRAY));
         messages.add(statusLine);
 
@@ -504,7 +508,7 @@ public final class PlayerInfoQuery {
         MutableComponent timeLine = Component.literal("")
                 .append(Component.literal("在线: ").withStyle(ChatFormatting.GRAY))
                 .append(Component.literal("总 " + info.getTotalTimeString()).withStyle(ChatFormatting.GREEN))
-                .append(Component.literal(" (本次 " + info.getSessionTimeString() + ")")
+                .append(Component.literal(" (本次 " + info.getSessionTimeString() + ")\n")
                         .withStyle(ChatFormatting.DARK_GREEN));
         messages.add(timeLine);
 
@@ -514,7 +518,7 @@ public final class PlayerInfoQuery {
                 .append(Component.literal(info.latency() + "ms").withStyle(getLatencyColor(info.latency())))
                 .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal("模式: ").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(info.gameMode()).withStyle(getGameModeColor(info.gameMode())));
+                .append(Component.literal(info.gameMode()+"\n").withStyle(getGameModeColor(info.gameMode())));
         messages.add(miscLine);
 
         return messages;

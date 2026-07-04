@@ -19,3 +19,4 @@ classes/
 *.launch
 .continue/tmp/
 .continue/rules/project_context.md
+.architectury-transformer/debug.log
