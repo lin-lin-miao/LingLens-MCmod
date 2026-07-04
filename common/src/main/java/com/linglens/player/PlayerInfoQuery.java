@@ -473,9 +473,9 @@ public final class PlayerInfoQuery {
         // UUID
         MutableComponent uuidLine = Component.literal("")
                 .append(Component.literal("UUID: ").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(info.uuid()+"\n").withStyle(ChatFormatting.WHITE))
+                .append(Component.literal(info.uuid() + "\n").withStyle(ChatFormatting.WHITE))
                 .setStyle(Style.EMPTY.withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, info.uuid()))
-                .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("点击复制"))));
+                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("点击复制"))));
         messages.add(uuidLine);
 
         // 位置与维度
@@ -518,7 +518,7 @@ public final class PlayerInfoQuery {
                 .append(Component.literal(info.latency() + "ms").withStyle(getLatencyColor(info.latency())))
                 .append(Component.literal(" | ").withStyle(ChatFormatting.DARK_GRAY))
                 .append(Component.literal("模式: ").withStyle(ChatFormatting.GRAY))
-                .append(Component.literal(info.gameMode()+"\n").withStyle(getGameModeColor(info.gameMode())));
+                .append(Component.literal(info.gameMode() + "\n").withStyle(getGameModeColor(info.gameMode())));
         messages.add(miscLine);
 
         return messages;
@@ -533,6 +533,134 @@ public final class PlayerInfoQuery {
     public static Component buildPlayerNotFoundMessage(String playerName) {
         return Component.literal("玩家 \"" + playerName + "\" 不在线或不存在")
                 .withStyle(ChatFormatting.RED);
+    }
+
+    // ==================== 所有玩家（含离线）在线时长排名 ====================
+
+    /**
+     * 所有玩家（含离线）在线时长排序记录。
+     */
+    public record PlayTimeEntry(String name, String uuid, long totalSeconds) {
+    }
+
+    /**
+     * 从持久化数据中获取所有已知玩家（含离线）的在线时长列表，按总时长降序排列。
+     * <p>
+     * 数据来源：历史累计时长 ({@link #totalPlayTime}) + 当前在线玩家本次 session 时长。
+     * 玩家名称优先通过 {@code MinecraftServer.getProfileCache()} 获取，
+     * 若缓存中不存在则使用 {@code "未知(<UUID前8位>)"} 作为占位名。
+     * </p>
+     *
+     * @param server Minecraft 服务器实例，用于获取玩家名称
+     * @return 按总时长降序排列的 {@link PlayTimeEntry} 列表
+     */
+    public static List<PlayTimeEntry> getAllPlayTimeSorted(MinecraftServer server) {
+        // 1. 合并历史累计与当前在线时长
+        Map<UUID, Long> merged = new HashMap<>(totalPlayTime);
+        long now = System.currentTimeMillis();
+        for (Map.Entry<UUID, Long> entry : loginTimestamps.entrySet()) {
+            long session = (now - entry.getValue()) / 1000;
+            merged.merge(entry.getKey(), session, Long::sum);
+        }
+
+        // 2. 转为条目列表并排序
+        List<PlayTimeEntry> entries = new ArrayList<>(merged.size());
+        for (Map.Entry<UUID, Long> e : merged.entrySet()) {
+            UUID uuid = e.getKey();
+            String name = resolvePlayerName(server, uuid);
+            entries.add(new PlayTimeEntry(name, uuid.toString(), e.getValue()));
+        }
+        entries.sort(Comparator.comparingLong(PlayTimeEntry::totalSeconds).reversed());
+
+        LOGGER.debug("[LingLens] 已生成所有玩家在线时长列表，共 {} 条", entries.size());
+        return entries;
+    }
+
+    /**
+     * 通过 UUID 解析玩家名称。
+     * <p>
+     * 优先从在线玩家列表和 {@link com.mojang.authlib.GameProfile} 缓存中获取，
+     * 若无法获取则返回形如 "未知(&lt;UUID前8位&gt;)" 的占位字符串。
+     * </p>
+     *
+     * @param server Minecraft 服务器实例
+     * @param uuid   玩家 UUID
+     * @return 玩家名称（不为 null）
+     */
+    private static String resolvePlayerName(MinecraftServer server, UUID uuid) {
+        // 优先检查在线玩家
+        ServerPlayer online = server.getPlayerList().getPlayer(uuid);
+        if (online != null) {
+            return online.getGameProfile().getName();
+        }
+        // 尝试从离线缓存读取
+        var cache = server.getProfileCache();
+        if (cache != null) {
+            var profileOpt = cache.get(uuid);
+            if (profileOpt.isPresent()) {
+                return profileOpt.get().getName();
+            }
+        }
+        // 最终 fallback
+        return "未知(" + uuid.toString().substring(0, 8) + ")";
+    }
+
+    /**
+     * 构建所有玩家（含离线）在线时长排名的消息组件。
+     * <p>
+     * 格式示例：
+     * 
+     * <pre>
+     * §6=== 所有玩家在线时长排名 ===
+     * §71. §aAlice          §e100h 30m 15s
+     * §72. §aBob            §e 50h 12m  5s
+     * §73. §7未知(abc12345) §e  1h  0m  0s
+     * </pre>
+     * </p>
+     *
+     * @param server Minecraft 服务器实例
+     * @return 可发送的 Component
+     */
+    public static Component buildAllPlayTimeSortedMessage(MinecraftServer server) {
+        List<PlayTimeEntry> entries = getAllPlayTimeSorted(server);
+        MutableComponent msg = Component.literal("§6=== 所有玩家在线时长排名 ===\n");
+        if (entries.isEmpty()) {
+            msg.append(Component.literal("§7尚无记录\n"));
+            return msg;
+        }
+
+        // 计算序号宽度与玩家名称最大宽度用于对齐
+        int rankWidth = String.valueOf(entries.size()).length();
+        int maxNameLen = entries.stream()
+                .mapToInt(e -> e.name().length())
+                .max()
+                .orElse(10);
+        maxNameLen = Math.min(Math.max(maxNameLen, 8), 30);
+
+        for (int i = 0; i < entries.size(); i++) {
+            PlayTimeEntry entry = entries.get(i);
+            MutableComponent line = Component.literal("");
+
+            // 序号（右对齐）
+            line.append(Component.literal(String.format("§7%" + rankWidth + "d. ", i + 1)));
+
+            // 玩家名称（左对齐，截断至 maxNameLen）
+            String name = entry.name();
+            if (name.length() > maxNameLen) {
+                name = name.substring(0, maxNameLen - 3) + "...";
+            }
+            line.append(Component.literal(String.format("§a%-" + maxNameLen + "s ", name)));
+
+            // 在线时长（格式化为 Xh Ym Zs）
+            long secs = entry.totalSeconds();
+            long hours = secs / 3600;
+            long mins = (secs % 3600) / 60;
+            long secsRemain = secs % 60;
+            line.append(Component.literal(String.format("§e%dh %dm %ds\n", hours, mins, secsRemain)));
+
+            msg.append(line);
+        }
+        return msg;
     }
 
     // ==================== 辅助方法 ====================

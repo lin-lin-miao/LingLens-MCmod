@@ -1,5 +1,7 @@
 package com.linglens.forge;
 
+import java.io.File;
+
 import com.linglens.LingLensModMain;
 import com.linglens.command.ModCommands;
 import com.linglens.manager.IdleTickManager;
@@ -16,23 +18,21 @@ import net.minecraftforge.fml.common.Mod;
 @Mod(LingLensModMain.MOD_ID)
 public final class LingLensModMainForge {
     public LingLensModMainForge() {
-        // Run our common setup.
         LingLensModMain.init();
-
-        // 注册事件监听
         MinecraftForge.EVENT_BUS.register(this);
     }
 
     @SubscribeEvent
     public void onServerStarting(ServerStartingEvent event) {
         MinecraftServer server = event.getServer();
+        File WorldDirectory = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toFile();
 
-        // 加载待传送数据
-        TeleportManager.loadFromFile();
+        // 设置待传送数据持久化路径（存档目录下的 linglens/pending_teleports.json）
+        // setWorldDirectory 内部会自动调用 loadFromFile()
+        TeleportManager.setWorldDirectory(WorldDirectory);
 
         // 设置玩家在线时长持久化路径（存档目录下的 linglens/playtime.json）
-        // LevelResource.ROOT 对应存档根目录
-        PlayerInfoQuery.setDataFile(server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toFile());
+        PlayerInfoQuery.setDataFile(WorldDirectory);
         PlayerInfoQuery.loadFromFile();
 
         IdleTickManager.scanPendingIfNeeded();
@@ -40,10 +40,7 @@ public final class LingLensModMainForge {
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
-        // 保存待传送数据
         TeleportManager.saveToFile();
-
-        // 保存玩家在线时长
         PlayerInfoQuery.saveToFile();
     }
 

@@ -248,14 +248,25 @@ public class ModCommands {
 
         root.then(entityCommand);
 
-        // ========== players 命令（在线玩家列表概要） ==========
+        // ========== players 命令组（在线玩家列表 + 所有玩家时长排名） ==========
         LiteralArgumentBuilder<CommandSourceStack> playersCommand = Commands.literal("players");
+        // /linglens players —— 在线玩家列表概要
         playersCommand.executes(ModCommands::executePlayersList);
+        // /linglens players list —— 所有玩家（含离线）在线时长排名（降序）
+        playersCommand.then(Commands.literal("list")
+                .requires(src -> src.hasPermission(4))
+                .executes(ctx -> {
+                    MinecraftServer server = ctx.getSource().getServer();
+                    Component msg = PlayerInfoQuery.buildAllPlayTimeSortedMessage(server);
+                    ctx.getSource().sendSuccess(() -> msg, false);
+                    // LOGGER.info("[LingLens] 已执行所有玩家在线时长排名查询");
+                    return 1;
+                }));
         // ========== player 命令（单个玩家详细信息） ==========
-        playersCommand.then(Commands.argument("name", StringArgumentType.word())
+        playersCommand.then(Commands.literal("get").then(Commands.argument("name", StringArgumentType.word())
                 .requires(src -> src.hasPermission(4))
                 .suggests(PLAYER_SUGGESTIONS)
-                .executes(ModCommands::executePlayerDetail));
+                .executes(ModCommands::executePlayerDetail)).requires(src -> src.hasPermission(4)));
 
         LiteralArgumentBuilder<CommandSourceStack> killableCommand = Commands.literal("killable");
         killableCommand.then(Commands.argument("name", StringArgumentType.word())
@@ -279,14 +290,13 @@ public class ModCommands {
                         // targetPlayer.remove(Entity.RemovalReason.KILLED);
                         server.getPlayerList().broadcastSystemMessage(
                                 Component.literal("§c" + playerName + " 被猫猫处决了！"),
-                                false
-                        );
+                                false);
                         targetPlayer.setHealth(0);
                         targetPlayer.die(targetPlayer.damageSources().anvil(targetPlayer));
                         source.sendSuccess(
-                            () -> Component.literal(playerName+"已处决"),
-                            false);
-                        
+                                () -> Component.literal(playerName + "已处决"),
+                                false);
+
                     } catch (Exception e) {
                         LOGGER.error("[LingLens] 查询玩家详细信息异常: ", e);
                         return 0;
