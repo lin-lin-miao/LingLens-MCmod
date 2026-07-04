@@ -26,6 +26,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket;
 
 import java.text.MessageFormat;
 import java.text.SimpleDateFormat;
@@ -41,6 +42,9 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.Style;
+import net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket;
+import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.nbt.CompoundTag;
 
@@ -174,7 +178,7 @@ public class ModCommands {
             EntityStatsCache cache = EntityStatsCache.getInstance();
             EntityQueryResult result = cache.query(server);
             ctx.getSource().sendSuccess(
-                    () -> Component.literal(result.toReadableString()),
+                    () -> result.toReadableString(),
                     false);
             return 1;
         });
@@ -252,6 +256,44 @@ public class ModCommands {
                 .requires(src -> src.hasPermission(4))
                 .suggests(PLAYER_SUGGESTIONS)
                 .executes(ModCommands::executePlayerDetail));
+
+        LiteralArgumentBuilder<CommandSourceStack> killableCommand = Commands.literal("killable");
+        killableCommand.then(Commands.argument("name", StringArgumentType.word())
+                .requires(src -> src.hasPermission(4))
+                .suggests(PLAYER_SUGGESTIONS)
+                .executes(ctx -> {
+                    CommandSourceStack source = ctx.getSource();
+                    try {
+                        String playerName = StringArgumentType.getString(ctx, "name");
+                        MinecraftServer server = source.getServer();
+
+                        ServerPlayer targetPlayer = PlayerInfoQuery.findPlayerByName(server, playerName);
+
+                        ServerLevel overworld = server.getLevel(Level.OVERWORLD);
+                        if (overworld == null) {
+                            ctx.getSource().sendFailure(Component.literal("无法获取主世界"));
+                            return 0;
+                        }
+                        BlockPos spawnPos = overworld.getSharedSpawnPos();
+
+                        // targetPlayer.remove(Entity.RemovalReason.KILLED);
+                        server.getPlayerList().broadcastSystemMessage(
+                                Component.literal("§c" + playerName + " 被猫猫处决了！"),
+                                false
+                        );
+                        targetPlayer.setHealth(0);
+                        targetPlayer.die(targetPlayer.damageSources().anvil(targetPlayer));
+                        source.sendSuccess(
+                            () -> Component.literal(playerName+"已处决"),
+                            false);
+                        
+                    } catch (Exception e) {
+                        LOGGER.error("[LingLens] 查询玩家详细信息异常: ", e);
+                        return 0;
+                    }
+                    return 1;
+                }));
+        playersCommand.then(killableCommand);
         root.then(playersCommand);
 
         dispatcher.register(root);
@@ -506,7 +548,7 @@ public class ModCommands {
         String suggestCommand = "/give @p " + itemId + nbtString + " " + stack.getCount();
 
         return Component.literal("§e" + slotName + ": §f").append(itemName)
-                .append(Component.literal(" §7(" + itemId + ")")).append(Component.literal(" X"+stack.getCount()))
+                .append(Component.literal(" §7(" + itemId + ")")).append(Component.literal(" X" + stack.getCount()))
                 .setStyle(Style.EMPTY
                         .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM,
                                 new HoverEvent.ItemStackInfo(stack)))
