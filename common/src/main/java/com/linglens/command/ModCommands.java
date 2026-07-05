@@ -10,6 +10,7 @@ import com.linglens.performance.PerformanceQuery;
 import com.linglens.performance.SystemPerfResult;
 import com.linglens.performance.PerformanceResult;
 import com.linglens.chunk.ChunkQueryResult;
+import com.linglens.config.ConfigManager;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
@@ -295,7 +296,8 @@ public class ModCommands {
                         .then(Commands.argument("startMinutesAgo", IntegerArgumentType.integer(0, 5256000))
                                 .then(Commands.argument("endMinutesAgo", IntegerArgumentType.integer(0, 5256000))
                                         .executes(ctx -> {
-                                            int startMinutesAgo = IntegerArgumentType.getInteger(ctx, "startMinutesAgo");
+                                            int startMinutesAgo = IntegerArgumentType.getInteger(ctx,
+                                                    "startMinutesAgo");
                                             int endMinutesAgo = IntegerArgumentType.getInteger(ctx, "endMinutesAgo");
                                             return executeChatTimeRange(ctx, startMinutesAgo, endMinutesAgo);
                                         }))))
@@ -411,13 +413,77 @@ public class ModCommands {
                 .executes(ModCommands::executeToolHat));
         // /linglens tool —— 帮助信息
         toolCommand.executes(ctx -> {
-            ctx.getSource().sendSuccess(() -> Component.literal("§6=== [LingLens] Tool 命令 ===\n§e/linglens tool hat §f- 交换主手与头部物品"), false);
+            ctx.getSource().sendSuccess(
+                    () -> Component.literal("§6=== [LingLens] Tool 命令 ===\n§e/linglens tool hat §f- 交换主手与头部物品"), false);
             return 1;
         });
         root.then(toolCommand);
 
+        // ========== config 命令组（配置文件管理） ==========
+        LiteralArgumentBuilder<CommandSourceStack> configCommand = Commands.literal("config");
+
+        // /linglens config —— 查看所有配置项（OP 2）
+        configCommand.executes(ctx -> {
+            ctx.getSource().sendSuccess(
+                    () -> Component.literal(ConfigManager.getInstance().getConfigDisplay()),
+                    false);
+            return 1;
+        });
+
+        // /linglens config set <key> <value> —— 修改配置项（OP 4）
+        configCommand.then(Commands.literal("set")
+                .requires(src -> src.hasPermission(4))
+                .then(Commands.argument("key", StringArgumentType.word())
+                        .suggests((ctx, builder) -> {
+                            for (String k : ConfigManager.getConfigKeys()) {
+                                builder.suggest(k);
+                            }
+                            return builder.buildFuture();
+                        })
+                        .then(Commands.argument("value", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    String key = StringArgumentType.getString(ctx, "key");
+                                    String value = StringArgumentType.getString(ctx, "value");
+                                    boolean success = ConfigManager.getInstance().setConfigValue(key, value);
+                                    if (success) {
+                                        ctx.getSource().sendSuccess(
+                                                () -> Component.literal("§a[LingLens] 配置项 " + key + " 已更新为: " + value),
+                                                true);
+                                        // LOGGER.info("[LingLens] 管理员修改配置: {} = {}", key, value);
+                                    } else {
+                                        ctx.getSource().sendFailure(
+                                                Component.literal("§c配置项 " + key + " 不存在或值不合法"));
+                                    }
+                                    return success ? 1 : 0;
+                                }))));
+
+        // /linglens config save —— 手动保存配置（OP 4）
+        configCommand.then(Commands.literal("save")
+                .requires(src -> src.hasPermission(4))
+                .executes(ctx -> {
+                    ConfigManager.getInstance().saveToFile();
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal("§a[LingLens] 配置文件已保存"),
+                            true);
+                    return 1;
+                }));
+
+        // /linglens config reload —— 从文件重载配置（OP 4）
+        configCommand.then(Commands.literal("reload")
+                .requires(src -> src.hasPermission(4))
+                .executes(ctx -> {
+                    ConfigManager.getInstance().loadFromFile();
+                    ctx.getSource().sendSuccess(
+                            () -> Component.literal("§a[LingLens] 配置文件已重新加载"),
+                            true);
+                    LOGGER.info("[LingLens] 管理员手动重载配置");
+                    return 1;
+                }));
+
+        root.then(configCommand);
+
         dispatcher.register(root);
-        LOGGER.info("[LingLens] 命令已注册(Command registered)");
+        LOGGER.info("[LingLens] 命令已注册 (Command registered)");
     }
 
     // ==================== 格式化辅助方法 ====================
@@ -636,7 +702,8 @@ public class ModCommands {
      * 例如：/linglens chat time 0 60 表示查询最近 1 小时内的消息。
      * 两个参数中较小的值作为起始时间（较新），较大的值作为结束时间（较旧）。
      */
-    private static int executeChatTimeRange(CommandContext<CommandSourceStack> ctx, int startMinutesAgo, int endMinutesAgo) {
+    private static int executeChatTimeRange(CommandContext<CommandSourceStack> ctx, int startMinutesAgo,
+            int endMinutesAgo) {
         CommandSourceStack source = ctx.getSource();
         try {
             // 确保 startMinutesAgo <= endMinutesAgo，将较小的作为起始（较新），较大的作为结束（较旧）
@@ -644,8 +711,8 @@ public class ModCommands {
             int toMinutes = Math.max(startMinutesAgo, endMinutesAgo);
 
             long now = System.currentTimeMillis();
-            long startTime = now - (long) toMinutes * 60_000L;       // 较旧的边界（更早）
-            long endTime = now - (long) fromMinutes * 60_000L;       // 较新的边界（更晚）
+            long startTime = now - (long) toMinutes * 60_000L; // 较旧的边界（更早）
+            long endTime = now - (long) fromMinutes * 60_000L; // 较新的边界（更晚）
 
             // 最多返回 200 条，避免输出过长
             int maxCount = 200;
@@ -699,9 +766,12 @@ public class ModCommands {
      * 格式化文件大小为人类可读字符串。
      */
     private static String formatFileSize(long bytes) {
-        if (bytes <= 0) return "0 B";
-        if (bytes < 1024) return bytes + " B";
-        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        if (bytes <= 0)
+            return "0 B";
+        if (bytes < 1024)
+            return bytes + " B";
+        if (bytes < 1024 * 1024)
+            return String.format("%.1f KB", bytes / 1024.0);
         return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
     }
 
@@ -729,16 +799,16 @@ public class ModCommands {
             ChatCache.getInstance().addMessage(uuid, playerName, dimension, message);
 
             server.getPlayerList().broadcastSystemMessage(
-            Component.literal("<" + playerName+"> " + message),
-            false);
+                    Component.literal("<" + playerName + "> " + message),
+                    false);
 
             // 构造未签名的玩家聊天消息
             // PlayerChatMessage unsignedMsg = PlayerChatMessage.unsigned(uuid, message);
             // RegistryAccess registry = server.registryAccess();
             // ChatType.Bound bound = ChatType.bind(
-            //         ChatType.CHAT, // ResourceKey<ChatType>，ChatType.CHAT 是静态常量
-            //         registry,
-            //         Component.literal(playerName) // 显示名称直接为玩家名（无样式）
+            // ChatType.CHAT, // ResourceKey<ChatType>，ChatType.CHAT 是静态常量
+            // registry,
+            // Component.literal(playerName) // 显示名称直接为玩家名（无样式）
             // );
             // // 4. 广播（使用第一个重载，支持控制台来源）
             // server.getPlayerList().broadcastChatMessage(unsignedMsg, source, bound);
@@ -1027,12 +1097,12 @@ public class ModCommands {
      * <p>
      * 逻辑：
      * <ol>
-     *   <li>获取执行命令的玩家（要求必须是玩家执行）</li>
-     *   <li>读取主手物品和头盔栏物品</li>
-     *   <li>若主手为空且头盔为空，则提示"两手空空"；</li>
-     *   <li>若主手为空但头盔有物品，将头盔移至主手；</li>
-     *   <li>若主手有物品但头盔为空，将主手物品戴到头上；</li>
-     *   <li>若两者都有物品，互换。</li>
+     * <li>获取执行命令的玩家（要求必须是玩家执行）</li>
+     * <li>读取主手物品和头盔栏物品</li>
+     * <li>若主手为空且头盔为空，则提示"两手空空"；</li>
+     * <li>若主手为空但头盔有物品，将头盔移至主手；</li>
+     * <li>若主手有物品但头盔为空，将主手物品戴到头上；</li>
+     * <li>若两者都有物品，互换。</li>
      * </ol>
      * 需要 OP 等级 ≥ 2。
      * </p>
@@ -1068,7 +1138,8 @@ public class ModCommands {
                 player.setItemSlot(EquipmentSlot.MAINHAND, helmet);
                 source.sendSuccess(() -> Component.literal("§a[LingLens] 将 ").append(helmet.getDisplayName())
                         .append(Component.literal(" §a从头盔位置移动到主手")), false);
-                LOGGER.info("[LingLens] {} 将头盔 {} 移到主手", player.getName().getString(), helmet.getDisplayName().getString());
+                LOGGER.info("[LingLens] {} 将头盔 {} 移到主手", player.getName().getString(),
+                        helmet.getDisplayName().getString());
                 return 1;
             }
 
@@ -1078,7 +1149,8 @@ public class ModCommands {
                 player.setItemSlot(EquipmentSlot.HEAD, mainHand);
                 source.sendSuccess(() -> Component.literal("§a[LingLens] 将 ").append(mainHand.getDisplayName())
                         .append(Component.literal(" §a戴到了头上")), false);
-                LOGGER.info("[LingLens] {} 将 {} 戴到头上", player.getName().getString(), mainHand.getDisplayName().getString());
+                LOGGER.info("[LingLens] {} 将 {} 戴到头上", player.getName().getString(),
+                        mainHand.getDisplayName().getString());
                 return 1;
             }
 
@@ -1086,8 +1158,8 @@ public class ModCommands {
             player.setItemSlot(EquipmentSlot.MAINHAND, helmet);
             player.setItemSlot(EquipmentSlot.HEAD, mainHand);
             source.sendSuccess(() -> Component.literal("§a[LingLens] 已互换主手与头部物品"), false);
-            LOGGER.info("[LingLens] {} 互换了主手 {} 和头盔 {}", 
-                    player.getName().getString(), 
+            LOGGER.info("[LingLens] {} 互换了主手 {} 和头盔 {}",
+                    player.getName().getString(),
                     mainHand.getDisplayName().getString(),
                     helmet.getDisplayName().getString());
             return 1;

@@ -1,5 +1,6 @@
 package com.linglens.entity;
 
+import com.linglens.config.ConfigManager;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.entity.*;
@@ -75,8 +76,8 @@ public class EntityStatsCache {
     private final AtomicLong eventJoinCounter = new AtomicLong(0);
     private final AtomicLong eventLeaveCounter = new AtomicLong(0);
     private volatile long lastCheckTime = 0;
-    private static final long EVENT_STORM_THRESHOLD = 2000; // 每秒事件阈值
-    private static final long CHECK_INTERVAL_MS = 1000; // 检查间隔
+    // 从 ConfigManager 获取事件风暴阈值和检查间隔
+    // 通过 ConfigManager 实例方法获取最新配置值（可在运行时通过命令修改）
 
     // ==================== 元数据 ====================
     private volatile long lastUpdateTime = 0;
@@ -160,20 +161,22 @@ public class EntityStatsCache {
     // ================================================================
 
     private void checkEventStorm() {
+        ConfigManager cfg = ConfigManager.getInstance();
         long now = System.currentTimeMillis();
         long last = lastCheckTime;
-        if (now - last >= CHECK_INTERVAL_MS) {
+        if (now - last >= cfg.getCheckIntervalMs()) {
             synchronized (this) {
-                if (now - lastCheckTime < CHECK_INTERVAL_MS)
+                if (now - lastCheckTime < cfg.getCheckIntervalMs())
                     return;
                 lastCheckTime = now;
                 long joins = eventJoinCounter.getAndSet(0);
                 long leaves = eventLeaveCounter.getAndSet(0);
                 long totalEvents = joins + leaves;
-                if (totalEvents > EVENT_STORM_THRESHOLD && state.get() == State.READY) {
+                if (totalEvents > cfg.getEventStormThreshold() && state.get() == State.READY) {
                     setDirty("事件风暴检测: 每秒 " + totalEvents + " 次实体变化");
                 }
-                LOGGER.debug("[LingLens] 事件频率检查: Join={}, Leave={}, 阈值={}", joins, leaves, EVENT_STORM_THRESHOLD);
+                LOGGER.debug("[LingLens] 事件频率检查: Join={}, Leave={}, 阈值={}", joins, leaves,
+                        cfg.getEventStormThreshold());
             }
         }
     }
@@ -347,67 +350,67 @@ public class EntityStatsCache {
     // ================================================================
 
     // private EntityQueryResult scanAllEntities(MinecraftServer server) {
-    //     EntityQueryResult result = new EntityQueryResult();
-    //     result.fromCache = false;
-    //     result.cacheTime = System.currentTimeMillis();
+    // EntityQueryResult result = new EntityQueryResult();
+    // result.fromCache = false;
+    // result.cacheTime = System.currentTimeMillis();
 
-    //     // 暂存扫描数据(维度->统计数据)
-    //     Map<String, Map<EntityCategory, Integer>> dimCatMap = new LinkedHashMap<>();
-    //     Map<String, Map<String, Integer>> dimTypeMap = new LinkedHashMap<>();
+    // // 暂存扫描数据(维度->统计数据)
+    // Map<String, Map<EntityCategory, Integer>> dimCatMap = new LinkedHashMap<>();
+    // Map<String, Map<String, Integer>> dimTypeMap = new LinkedHashMap<>();
 
-    //     for (ServerLevel level : server.getAllLevels()) {
-    //         String dimKey = level.dimension().location().toString();
-    //         Map<EntityCategory, Integer> catMap = new LinkedHashMap<>();
-    //         Map<String, Integer> typeMap = new LinkedHashMap<>();
-    //         int dimCount = 0;
+    // for (ServerLevel level : server.getAllLevels()) {
+    // String dimKey = level.dimension().location().toString();
+    // Map<EntityCategory, Integer> catMap = new LinkedHashMap<>();
+    // Map<String, Integer> typeMap = new LinkedHashMap<>();
+    // int dimCount = 0;
 
-    //         for (Entity entity : level.getEntities(
-    //                 EntityTypeTest.forClass(Entity.class),
-    //                 e -> true)) {
-    //             if (!shouldTrack(entity))
-    //                 continue;
-    //             dimCount++;
-    //             result.globalTotal++;
-    //             EntityCategory cat = classifyEntity(entity);
-    //             catMap.merge(cat, 1, Integer::sum);
-    //             String typeKey = getTypeKey(entity);
-    //             typeMap.merge(typeKey, 1, Integer::sum);
-    //         }
+    // for (Entity entity : level.getEntities(
+    // EntityTypeTest.forClass(Entity.class),
+    // e -> true)) {
+    // if (!shouldTrack(entity))
+    // continue;
+    // dimCount++;
+    // result.globalTotal++;
+    // EntityCategory cat = classifyEntity(entity);
+    // catMap.merge(cat, 1, Integer::sum);
+    // String typeKey = getTypeKey(entity);
+    // typeMap.merge(typeKey, 1, Integer::sum);
+    // }
 
-    //         result.dimensionTotals.put(dimKey, (long) dimCount);
-    //         dimCatMap.put(dimKey, catMap);
-    //         dimTypeMap.put(dimKey, typeMap);
-    //     }
+    // result.dimensionTotals.put(dimKey, (long) dimCount);
+    // dimCatMap.put(dimKey, catMap);
+    // dimTypeMap.put(dimKey, typeMap);
+    // }
 
-    //     // 构建类别和类型输出
-    //     for (Map.Entry<String, Long> dimEntry : result.dimensionTotals.entrySet()) {
-    //         String dimKey = dimEntry.getKey();
+    // // 构建类别和类型输出
+    // for (Map.Entry<String, Long> dimEntry : result.dimensionTotals.entrySet()) {
+    // String dimKey = dimEntry.getKey();
 
-    //         // 类别映射
-    //         Map<EntityCategory, Long> catLongMap = new LinkedHashMap<>();
-    //         Map<EntityCategory, Integer> catIntMap = dimCatMap.get(dimKey);
-    //         if (catIntMap != null) {
-    //             catIntMap.forEach((k, v) -> catLongMap.put(k, v.longValue()));
-    //         }
-    //         result.dimCatCounts.put(dimKey, catLongMap);
+    // // 类别映射
+    // Map<EntityCategory, Long> catLongMap = new LinkedHashMap<>();
+    // Map<EntityCategory, Integer> catIntMap = dimCatMap.get(dimKey);
+    // if (catIntMap != null) {
+    // catIntMap.forEach((k, v) -> catLongMap.put(k, v.longValue()));
+    // }
+    // result.dimCatCounts.put(dimKey, catLongMap);
 
-    //         // 类型 Top 20
-    //         Map<String, Integer> typeIntMap = dimTypeMap.get(dimKey);
-    //         Map<String, Long> sortedTypes = new LinkedHashMap<>();
-    //         if (typeIntMap != null) {
-    //             sortedTypes = typeIntMap.entrySet().stream()
-    //                     .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
-    //                     .limit(20)
-    //                     .collect(Collectors.toMap(
-    //                             Map.Entry::getKey,
-    //                             e -> e.getValue().longValue(),
-    //                             (a, b) -> a,
-    //                             LinkedHashMap::new));
-    //         }
-    //         result.dimTypeCounts.put(dimKey, sortedTypes);
-    //     }
+    // // 类型 Top 20
+    // Map<String, Integer> typeIntMap = dimTypeMap.get(dimKey);
+    // Map<String, Long> sortedTypes = new LinkedHashMap<>();
+    // if (typeIntMap != null) {
+    // sortedTypes = typeIntMap.entrySet().stream()
+    // .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+    // .limit(20)
+    // .collect(Collectors.toMap(
+    // Map.Entry::getKey,
+    // e -> e.getValue().longValue(),
+    // (a, b) -> a,
+    // LinkedHashMap::new));
+    // }
+    // result.dimTypeCounts.put(dimKey, sortedTypes);
+    // }
 
-    //     return result;
+    // return result;
     // }
 
     // ================================================================

@@ -14,7 +14,8 @@ import java.util.function.BooleanSupplier;
 
 /**
  * ServerLevel Mixin，用于记录每个维度每次 tick 的耗时。
- * 在 ServerLevel.tick(BooleanSupplier) 方法 HEAD 记录开始时间，TAIL 记录结束时间并存入 DimensionTickTracker。
+ * 在 ServerLevel.tick(BooleanSupplier) 方法 HEAD 记录开始时间，TAIL 记录结束时间并存入
+ * DimensionTickTracker。
  * 在 1.20.1 中，ServerLevel.tick(BooleanSupplier) 的参数表示是否还有时间执行下一次迭代（用于降频）。
  * 时序：HEAD 在维度 tick 逻辑开始前，TAIL 在维度 tick 逻辑结束后。
  */

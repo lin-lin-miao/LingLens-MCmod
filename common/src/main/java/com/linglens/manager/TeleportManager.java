@@ -26,6 +26,7 @@ public class TeleportManager {
 
     /**
      * 供平台主类调用的存档目录设置方法（例如在服务器WorldLoad事件中）
+     * 
      * @param worldDir 世界存档目录（例如 world/dimensions/ 的上级）
      */
     public static void setWorldDirectory(File worldDir) {

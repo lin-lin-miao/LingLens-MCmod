@@ -17,11 +17,12 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(PlayerList.class)
 public class PlayerListMixin {
     // @Inject(
-    //     method = "placeNewPlayer",
-    //     at = @At("HEAD"),
-    //     cancellable = false
+    // method = "placeNewPlayer",
+    // at = @At("HEAD"),
+    // cancellable = false
     // )
-    // private void onPlaceNewPlayer(Connection connection, ServerPlayer player, CallbackInfo ci) {
-    //     // 此方法已留空，传送逻辑由 ServerPlayerMixin.onLoad 处理
+    // private void onPlaceNewPlayer(Connection connection, ServerPlayer player,
+    // CallbackInfo ci) {
+    // // 此方法已留空，传送逻辑由 ServerPlayerMixin.onLoad 处理
     // }
 }

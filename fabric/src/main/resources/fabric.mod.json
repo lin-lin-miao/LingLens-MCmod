@@ -1,37 +1,37 @@
 {
-  "schemaVersion": 1,
-  "id": "linglens",
-  "version": "${version}",
-  "name": "LingLens",
-  "description": "This is an example description! Tell everyone what your mod is about!",
-  "authors": [
-    "lin-lin-miao"
-  ],
-  "contact": {
-    "homepage": "https://lh.linglinmiao.fun/",
-    "sources": "https://github.com/lin-lin-miao/LingLens-MCmod"
-  },
-  "license": "CC0-1.0",
-  "icon": "assets/linglens/icon.png",
-  "environment": "*",
-  "entrypoints": {
-    "main": [
-      "com.linglens.fabric.LingLensModMainFabric"
+    "schemaVersion": 1,
+    "id": "linglens",
+    "version": "${version}",
+    "name": "LingLens",
+    "description": "This is an example description! Tell everyone what your mod is about!",
+    "authors": [
+        "lin-lin-miao"
     ],
-    "client": [
-      "com.linglens.fabric.client.LingLensFabricClient"
-    ]
-  },
-  "mixins": [
-    "linglens.mixins.json"
-  ],
-  "depends": {
-    "fabricloader": ">=0.19.3",
-    "minecraft": "~1.20.1",
-    "java": ">=17",
-    "fabric-api": "*"
-  },
-  "suggests": {
-    "another-mod": "*"
-  }
+    "contact": {
+        "homepage": "https://lh.linglinmiao.fun/",
+        "sources": "https://github.com/lin-lin-miao/LingLens-MCmod"
+    },
+    "license": "CC0-1.0",
+    "icon": "assets/linglens/icon.png",
+    "environment": "*",
+    "entrypoints": {
+        "main": [
+            "com.linglens.fabric.LingLensModMainFabric"
+        ],
+        "client": [
+            "com.linglens.fabric.client.LingLensFabricClient"
+        ]
+    },
+    "mixins": [
+        "linglens.mixins.json"
+    ],
+    "depends": {
+        "fabricloader": ">=0.19.3",
+        "minecraft": "~1.20.1",
+        "java": ">=17",
+        "fabric-api": "*"
+    },
+    "suggests": {
+        "another-mod": "*"
+    }
 }

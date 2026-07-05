@@ -44,7 +44,7 @@ public class FabricEntityEventListener {
         });
 
         // 3. 维度卸载时标记缓存为脏
-        ServerWorldEvents.UNLOAD.register((server,Level) -> {
+        ServerWorldEvents.UNLOAD.register((server, Level) -> {
             if (!Level.isClientSide()) {
                 String dimKey = Level.dimension().location().toString();
                 EntityStatsCache.getInstance().removeDimension(dimKey);

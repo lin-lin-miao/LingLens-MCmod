@@ -6,7 +6,7 @@ import java.util.Map;
  * 性能查询结果封装类。
  * 包含 TPS、MSPT 以及各维度的 MSPT（可选）。
  */
-public record PerformanceResult(double tps,double idletps, double mspt, Map<String, Double> dimensionMspt) {
+public record PerformanceResult(double tps, double idletps, double mspt, Map<String, Double> dimensionMspt) {
 
     /**
      * 将结果格式化为可读的字符串（带颜色代码 §）。

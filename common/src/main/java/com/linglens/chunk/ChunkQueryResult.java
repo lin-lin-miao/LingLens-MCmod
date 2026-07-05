@@ -116,14 +116,30 @@ public class ChunkQueryResult {
             this.forcedCount = forcedCount;
         }
 
-        public String getDimensionName() { return dimensionName; }
-        public long getLoadedCount() { return loadedCount; }
-        public long getForcedCount() { return forcedCount; }
+        public String getDimensionName() {
+            return dimensionName;
+        }
+
+        public long getLoadedCount() {
+            return loadedCount;
+        }
+
+        public long getForcedCount() {
+            return forcedCount;
+        }
     }
 
     // ==================== Getter ====================
 
-    public List<DimensionChunkInfo> getDimensionInfos() { return dimensionInfos; }
-    public long getTotalLoaded() { return totalLoaded; }
-    public long getTotalForced() { return totalForced; }
+    public List<DimensionChunkInfo> getDimensionInfos() {
+        return dimensionInfos;
+    }
+
+    public long getTotalLoaded() {
+        return totalLoaded;
+    }
+
+    public long getTotalForced() {
+        return totalForced;
+    }
 }

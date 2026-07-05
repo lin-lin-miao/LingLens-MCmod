@@ -25,7 +25,8 @@ public final class FabricChatEventListener {
     public static void register() {
         // 1. 监听玩家聊天消息
         ServerMessageEvents.CHAT_MESSAGE.register((message, sender, params) -> {
-            if (sender == null || sender.level().isClientSide()) return;
+            if (sender == null || sender.level().isClientSide())
+                return;
 
             try {
                 // Minecraft 1.20.1: PlayerChatMessage 使用 signedBody().content() 获取 Component
@@ -37,8 +38,7 @@ public final class FabricChatEventListener {
                         sender.getUUID(),
                         senderName,
                         dimension,
-                        content
-                );
+                        content);
             } catch (Exception e) {
                 LOGGER.error("[LingLens] 缓存玩家聊天消息失败", e);
             }
@@ -48,15 +48,15 @@ public final class FabricChatEventListener {
         ServerMessageEvents.GAME_MESSAGE.register((server, message, overlay) -> {
             try {
                 String content = message.getString();
-                if (content == null || content.isBlank()) return;
+                if (content == null || content.isBlank())
+                    return;
 
                 // 系统消息使用一个固定的虚拟发送者信息
                 ChatCache.getInstance().addMessage(
                         new java.util.UUID(0, 1),
                         "§8System",
                         "minecraft:overworld",
-                        content
-                );
+                        content);
             } catch (Exception e) {
                 LOGGER.error("[LingLens] 缓存系统消息失败", e);
             }

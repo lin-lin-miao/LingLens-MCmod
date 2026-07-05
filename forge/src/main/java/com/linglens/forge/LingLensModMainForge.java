@@ -5,6 +5,8 @@ import java.io.File;
 import com.linglens.LingLensModMain;
 import com.linglens.chat.ChatCache;
 import com.linglens.command.ModCommands;
+import com.linglens.config.ConfigManager;
+import com.linglens.entity.EntityStatsCache;
 import com.linglens.manager.IdleTickManager;
 import com.linglens.manager.TeleportManager;
 import com.linglens.player.PlayerInfoQuery;
@@ -27,6 +29,14 @@ public final class LingLensModMainForge {
     public void onServerStarting(ServerStartingEvent event) {
         MinecraftServer server = event.getServer();
         File WorldDirectory = server.getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT).toFile();
+
+        // 初始化配置文件（<游戏目录>/config/linglens.json）
+        var configDir = server.getServerDirectory().toPath().resolve("config");
+        ConfigManager.init(configDir);
+
+        // 从配置同步各模块参数
+        ChatCache.applyConfigFromManager();
+        EntityStatsCache.getInstance(); // 确保单例初始化
 
         // 设置待传送数据持久化路径（存档目录下的 linglens/pending_teleports.json）
         // setWorldDirectory 内部会自动调用 loadFromFile()

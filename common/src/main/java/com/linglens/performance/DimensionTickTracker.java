@@ -15,10 +15,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * 设计说明：
  * - 在 1.20.1 中，维度 tick 在服务端主线程上串行执行，
- *   命令执行也在同一线程，所以理论上是单线程访问。
+ * 命令执行也在同一线程，所以理论上是单线程访问。
  * - 使用 ConcurrentHashMap 保证跨平台和未来版本的线程安全性。
  * - 每个维度维护一个环形缓冲区（long[]），以及一个写入索引计数器，
- *   写入索引始终递增，取模 SAMPLE_COUNT 获得实际数组位置。
+ * 写入索引始终递增，取模 SAMPLE_COUNT 获得实际数组位置。
  */
 public class DimensionTickTracker {
 

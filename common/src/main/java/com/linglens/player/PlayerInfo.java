@@ -27,22 +27,21 @@ import net.minecraft.resources.ResourceLocation;
  * @param totalTimeSeconds   总在线时长（秒）
  */
 public record PlayerInfo(
-    String name,
-    String uuid,
-    Vec3 position,
-    ResourceLocation dimension,
-    float health,
-    float maxHealth,
-    int armorValue,
-    int foodLevel,
-    float saturation,
-    int experienceLevel,
-    float experienceProgress,
-    String gameMode,
-    int latency,
-    long sessionTimeSeconds,
-    long totalTimeSeconds
-) {
+        String name,
+        String uuid,
+        Vec3 position,
+        ResourceLocation dimension,
+        float health,
+        float maxHealth,
+        int armorValue,
+        int foodLevel,
+        float saturation,
+        int experienceLevel,
+        float experienceProgress,
+        String gameMode,
+        int latency,
+        long sessionTimeSeconds,
+        long totalTimeSeconds) {
 
     /**
      * 获取格式化的坐标字符串（保留一位小数）。
@@ -116,10 +115,10 @@ public record PlayerInfo(
     /**
      * 将秒数格式化为人类可读时长字符串。
      * <ul>
-     *   <li>大于等于86400秒: 显示 "Xd Yh Zm"</li>
-     *   <li>大于等于3600秒: 显示 "Xh Ym Zs"</li>
-     *   <li>大于等于60秒: 显示 "Xm Ys"</li>
-     *   <li>不足60秒: 显示 "Xs"</li>
+     * <li>大于等于86400秒: 显示 "Xd Yh Zm"</li>
+     * <li>大于等于3600秒: 显示 "Xh Ym Zs"</li>
+     * <li>大于等于60秒: 显示 "Xm Ys"</li>
+     * <li>不足60秒: 显示 "Xs"</li>
      * </ul>
      *
      * @param seconds 秒数
@@ -135,10 +134,14 @@ public record PlayerInfo(
         long secs = seconds % 60;
 
         StringBuilder sb = new StringBuilder();
-        if (days > 0) sb.append(days).append("d ");
-        if (hours > 0) sb.append(hours).append("h ");
-        if (minutes > 0) sb.append(minutes).append("m ");
-        if (secs > 0 || sb.isEmpty()) sb.append(secs).append("s");
+        if (days > 0)
+            sb.append(days).append("d ");
+        if (hours > 0)
+            sb.append(hours).append("h ");
+        if (minutes > 0)
+            sb.append(minutes).append("m ");
+        if (secs > 0 || sb.isEmpty())
+            sb.append(secs).append("s");
         return sb.toString().trim();
     }
 }

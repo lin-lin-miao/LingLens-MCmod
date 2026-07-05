@@ -35,10 +35,12 @@ public final class ForgeChatEventListener {
     public static void onServerChat(ServerChatEvent event) {
         try {
             ServerPlayer player = event.getPlayer();
-            if (player == null || player.level().isClientSide()) return;
+            if (player == null || player.level().isClientSide())
+                return;
 
             String content = event.getMessage().getString();
-            if (content == null || content.isBlank()) return;
+            if (content == null || content.isBlank())
+                return;
 
             String senderName = player.getName().getString();
             String dimension = player.level().dimension().location().toString();
@@ -47,8 +49,7 @@ public final class ForgeChatEventListener {
                     player.getUUID(),
                     senderName,
                     dimension,
-                    content
-            );
+                    content);
         } catch (Exception e) {
             LOGGER.error("[LingLens] 缓存玩家聊天消息失败", e);
         }
@@ -68,8 +69,7 @@ public final class ForgeChatEventListener {
                     player.getUUID(),
                     player.getName().getString(),
                     player.level().dimension().location().toString(),
-                    msg
-            );
+                    msg);
         }
     }
 
@@ -83,13 +83,13 @@ public final class ForgeChatEventListener {
             String dim = "minecraft:overworld";
             try {
                 dim = player.level().dimension().location().toString();
-            } catch (Exception ignored) {}
+            } catch (Exception ignored) {
+            }
             ChatCache.getInstance().addMessage(
                     player.getUUID(),
                     player.getName().getString(),
                     dim,
-                    msg
-            );
+                    msg);
         }
     }
 }

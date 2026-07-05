@@ -20,11 +20,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public class ServerPlayerMixin {
 
     private static final Logger LOGGER = LoggerFactory.getLogger("LingLens");
-/**
- * 离线传送主要实现
- * @param compound
- * @param ci
- */
+
+    /**
+     * 离线传送主要实现
+     * 
+     * @param compound
+     * @param ci
+     */
     @Inject(method = "readAdditionalSaveData", at = @At("HEAD"))
     private void onReadAdditionalSaveData(CompoundTag compound, CallbackInfo ci) {
         ServerPlayer player = (ServerPlayer) (Object) this;

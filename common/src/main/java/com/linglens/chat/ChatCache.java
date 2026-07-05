@@ -1,6 +1,7 @@
 package com.linglens.chat;
 
 import com.linglens.annotation.IdleTickSave;
+import com.linglens.config.ConfigManager;
 import com.linglens.manager.IdleTickManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -57,6 +58,23 @@ public class ChatCache {
     static {
         // 注册本类到待扫描列表，等待服务器启动后由 IdleTickManager 自动扫描注解
         IdleTickManager.registerPendingClass(ChatCache.class);
+    }
+
+    // ================================================================
+    // 1. 配置同步（从 ConfigManager 读取并应用）
+    // ================================================================
+
+    /**
+     * 从 ConfigManager 同步聊天缓存相关配置。
+     * 在 ConfigManager 初始化后由平台主类调用。
+     */
+    public static void applyConfigFromManager() {
+        ChatCache cache = getInstance();
+        ConfigManager cfg = ConfigManager.getInstance();
+        cache.setMaxSize(cfg.getChatMaxSize());
+        cache.setRetentionDays(cfg.getChatRetentionDays());
+        LOGGER.info("[LingLens] 聊天缓存配置已从 ConfigManager 同步: maxSize={}, retentionDays={}",
+                cfg.getChatMaxSize(), cfg.getChatRetentionDays());
     }
 
     // ================================================================
@@ -239,7 +257,8 @@ public class ChatCache {
                 }
             }
             merged.sort((a, b) -> Long.compare(b.timestamp(), a.timestamp()));
-            if (merged.size() > maxCount) merged = merged.subList(0, maxCount);
+            if (merged.size() > maxCount)
+                merged = merged.subList(0, maxCount);
             return merged;
         }
         return memResult;
@@ -281,7 +300,8 @@ public class ChatCache {
                 }
             }
             merged.sort((a, b) -> Long.compare(b.timestamp(), a.timestamp()));
-            if (merged.size() > maxCount) merged = merged.subList(0, maxCount);
+            if (merged.size() > maxCount)
+                merged = merged.subList(0, maxCount);
             return merged;
         }
         return memResult;
@@ -377,7 +397,7 @@ public class ChatCache {
         }
 
         // 2. 如果 from 超出内存缓存大小，需要从持久化文件补充
-        //    内存缓存中的消息是最新的，持久化文件中包含更旧的消息
+        // 内存缓存中的消息是最新的，持久化文件中包含更旧的消息
         int memSize;
         readLock.lock();
         try {
@@ -507,7 +527,8 @@ public class ChatCache {
      * 设置保留天数（消息保存天数，超过自动清理）。
      */
     public void setRetentionDays(int days) {
-        if (days < 1) days = 1;
+        if (days < 1)
+            days = 1;
         this.retentionDays = days;
         LOGGER.info("[LingLens] 聊天历史保留天数已设为 {}", days);
     }

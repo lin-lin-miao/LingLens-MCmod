@@ -2,6 +2,7 @@ package com.linglens.manager;
 
 import com.linglens.annotation.IdleTick;
 import com.linglens.annotation.IdleTickSave;
+import com.linglens.config.ConfigManager;
 import net.minecraft.server.MinecraftServer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,13 +21,14 @@ import java.util.function.Consumer;
  * 用于在服务器 Tick 负载低时执行非关键性任务。<br>
  * 所有注册的任务都是持久有效的(不会因执行一次而消失),直到手动反注册或重置。
  * <ul>
- *   <li><b>@IdleTick 任务</b>:每次空闲 Tick 会<b>遍历执行所有</b>已注册的空闲任务。</li>
- *   <li><b>@IdleTickSave 任务</b>:到达 {@link #TARGET_INTERVAL_TICKS} 时开始一轮保存,
- *       每个空闲 Tick 仅执行<b>一个</b>保存任务(轮询方式),完成整轮后重置计数器,等待下一轮；
- *       若超过 {@link #MAX_INTERVAL_TICKS} 仍未完成,则进入强制模式,每个 Tick 执行一个。</li>
+ * <li><b>@IdleTick 任务</b>:每次空闲 Tick 会<b>遍历执行所有</b>已注册的空闲任务。</li>
+ * <li><b>@IdleTickSave 任务</b>:到达 {@link #TARGET_INTERVAL_TICKS} 时开始一轮保存,
+ * 每个空闲 Tick 仅执行<b>一个</b>保存任务(轮询方式),完成整轮后重置计数器,等待下一轮；
+ * 若超过 {@link #MAX_INTERVAL_TICKS} 仍未完成,则进入强制模式,每个 Tick 执行一个。</li>
  * </ul>
  * <br>
  * 使用方式(二选一):
+ * 
  * <pre>{@code
  * // 方式一:手动注册
  * IdleTickManager.registerIdleTask(() -> myCache.refresh());
@@ -39,15 +41,15 @@ import java.util.function.Consumer;
  */
 public class IdleTickManager {
 
-    // ========== 可调参数 ==========
-    /** 理想间隔:30分(36000 tick),空闲达到此间隔时开始执行保存任务循环 */
-    private static final int TARGET_INTERVAL_TICKS = 36000;
+    // ========== 可调参数（默认值，可通过 ConfigManager 运行时修改）==========
+    /** 理想间隔:30分(36000 tick),空闲达到此间隔时开始执行保存任务循环（默认值） */
+    private static final int DEFAULT_TARGET_INTERVAL_TICKS = 36000;
 
-    /** 硬性最大间隔:60分(72000 tick),若保存循环未完成则强制每个Tick执行一个 */
-    private static final int MAX_INTERVAL_TICKS = 72000;
+    /** 硬性最大间隔:60分(72000 tick),若保存循环未完成则强制每个Tick执行一个（默认值） */
+    private static final int DEFAULT_MAX_INTERVAL_TICKS = 72000;
 
-    /** 空闲阈值:平均Tick耗时小于45ms视为空闲(跑满20TPS) */
-    private static final double IDLE_THRESHOLD_MS = 45.0;
+    /** 空闲阈值:平均Tick耗时小于45ms视为空闲(跑满20TPS)（默认值） */
+    private static final double DEFAULT_IDLE_THRESHOLD_MS = 45.0;
     // ===============================
 
     private static final Logger LOGGER = LoggerFactory.getLogger("LingLens");
@@ -55,7 +57,7 @@ public class IdleTickManager {
     /** Tick计数器 */
     private static int ticksCounter = 0;
 
-        /** 空闲任务列表:每次空闲Tick时遍历全部执行(持久有效) */
+    /** 空闲任务列表:每次空闲Tick时遍历全部执行(持久有效) */
     private static final List<Consumer<MinecraftServer>> idleTasks = new CopyOnWriteArrayList<>();
 
     /** 保存任务列表:持久有效,到达间隔时开始一轮轮询(持久有效) */
@@ -67,7 +69,7 @@ public class IdleTickManager {
     /** 是否正处于保存任务循环中(达到间隔后为 true,完成整轮后为 false) */
     private static boolean saveCycleActive = false;
 
-        /** 是否处于强制保存模式(达到最大间隔,每个Tick必须执行一个保存任务) */
+    /** 是否处于强制保存模式(达到最大间隔,每个Tick必须执行一个保存任务) */
     private static boolean forceSaving = false;
 
     /** 待扫描注解的类列表(各模块在静态块中注册,服务器启动后由 onTickEnd 自动扫描) */
@@ -76,11 +78,13 @@ public class IdleTickManager {
     /** 是否已完成对 pendingClasses 的扫描 */
     private static boolean pendingScanned = false;
 
-                // ========== 注册 / 取消注册 ==========
+    // ========== 注册 / 取消注册 ==========
 
     /**
      * 将一个类注册到待扫描列表中,等待服务器启动后由 onTickEnd 自动扫描。
-     * <p>适用于在类的静态初始化块中调用,无需外部手动注册。</p>
+     * <p>
+     * 适用于在类的静态初始化块中调用,无需外部手动注册。
+     * </p>
      *
      * @param clazz 包含 @IdleTick 或 @IdleTickSave 注解的类
      */
@@ -91,7 +95,9 @@ public class IdleTickManager {
 
     /**
      * 注册一个空闲Tick时执行的任务(持久有效,不会因执行而移除)。
-     * <p>每次空闲Tick都会遍历执行【所有】已注册的空闲任务。</p>
+     * <p>
+     * 每次空闲Tick都会遍历执行【所有】已注册的空闲任务。
+     * </p>
      *
      * @param task 要注册的任务(接受 MinecraftServer 参数)
      */
@@ -135,7 +141,7 @@ public class IdleTickManager {
         LOGGER.debug("[LingLens] 注册保存任务(Runnable),当前保存任务数: {}", saveTasks.size());
     }
 
-        /**
+    /**
      * 移除指定的空闲任务(Consumer 重载)
      *
      * @param task 之前注册的任务(需为同一对象引用)
@@ -215,7 +221,8 @@ public class IdleTickManager {
      * @return 剩余任务数,若不在保存循环中则返回 0
      */
     public static int getRemainingInCycle() {
-        if (!saveCycleActive) return 0;
+        if (!saveCycleActive)
+            return 0;
         int remaining = saveTasks.size() - saveTaskIndex;
         return Math.max(remaining, 0);
     }
@@ -233,7 +240,7 @@ public class IdleTickManager {
         LOGGER.info("[LingLens] 空闲Tick管理器已重置");
     }
 
-        // ========== 注解扫描注册 ==========
+    // ========== 注解扫描注册 ==========
 
     /**
      * 扫描指定类中带有 {@link IdleTick} 和 {@link IdleTickSave} 注解的静态方法,
@@ -241,9 +248,9 @@ public class IdleTickManager {
      * <p>
      * 要求被注解的方法满足:
      * <ul>
-     *   <li>修饰符为 {@code public static}</li>
-     *   <li>返回类型为 {@code void}</li>
-     *   <li>参数列表为空 或 单参数且类型为 {@code MinecraftServer}</li>
+     * <li>修饰符为 {@code public static}</li>
+     * <li>返回类型为 {@code void}</li>
+     * <li>参数列表为空 或 单参数且类型为 {@code MinecraftServer}</li>
      * </ul>
      * 不满足条件的方法会被跳过并记录警告。
      * </p>
@@ -265,7 +272,7 @@ public class IdleTickManager {
             if (!Modifier.isPublic(mod) || !Modifier.isStatic(mod)
                     || !method.getReturnType().equals(void.class)) {
                 LOGGER.warn("[LingLens] 方法 {}.{} 被注解标记但修饰符/返回类型不符合条件" +
-                                "(需为 public static void),已跳过",
+                        "(需为 public static void),已跳过",
                         clazz.getSimpleName(), method.getName());
                 continue;
             }
@@ -279,7 +286,7 @@ public class IdleTickManager {
                 takesServer = true;
             } else {
                 LOGGER.warn("[LingLens] 方法 {}.{} 被注解标记但参数不符合条件" +
-                                "(需为无参 或 单参数 MinecraftServer),已跳过",
+                        "(需为无参 或 单参数 MinecraftServer),已跳过",
                         clazz.getSimpleName(), method.getName());
                 continue;
             }
@@ -306,7 +313,7 @@ public class IdleTickManager {
                 registerSaveTask(task);
                 LOGGER.debug("[LingLens] 通过 @IdleTickSave 注册方法: {}.{}", clazz.getSimpleName(), method.getName());
             }
-                        LOGGER.info("[LingLens] 注册空闲Tick:{} 注册空闲Save:{}", idleTasks.size(), saveTasks.size());
+            LOGGER.info("[LingLens] 注册空闲Tick:{} 注册空闲Save:{}", idleTasks.size(), saveTasks.size());
         }
     }
 
@@ -315,7 +322,8 @@ public class IdleTickManager {
      * 此方法由 {@link #onTickEnd(MinecraftServer)} 自动调用。
      */
     public static void scanPendingIfNeeded() {
-        if (pendingScanned) return;
+        if (pendingScanned)
+            return;
         pendingScanned = true;
         if (pendingClasses.isEmpty()) {
             LOGGER.debug("[LingLens] 待扫描类列表为空,跳过");
@@ -333,21 +341,22 @@ public class IdleTickManager {
     /**
      * 在每个Tick结束时调用,根据当前服务器负载决定是否执行任务。
      * <ol>
-     *   <li>每Tick累计计数</li>
-     *   <li>空闲且无强制/保存循环时:遍历执行所有 idleTasks</li>
-     *   <li>空闲且处于保存循环时:执行一个 saveTask,索引后移,完成整轮后重置循环</li>
-     *   <li>达到 {@link #TARGET_INTERVAL_TICKS} 时:启动保存循环(仅在空闲时执行)</li>
-     *   <li>达到 {@link #MAX_INTERVAL_TICKS} 时:进入强制模式,每个Tick执行一个保存任务</li>
+     * <li>每Tick累计计数</li>
+     * <li>空闲且无强制/保存循环时:遍历执行所有 idleTasks</li>
+     * <li>空闲且处于保存循环时:执行一个 saveTask,索引后移,完成整轮后重置循环</li>
+     * <li>达到 {@link #TARGET_INTERVAL_TICKS} 时:启动保存循环(仅在空闲时执行)</li>
+     * <li>达到 {@link #MAX_INTERVAL_TICKS} 时:进入强制模式,每个Tick执行一个保存任务</li>
      * </ol>
      *
      * @param server Minecraft服务器实例(用于获取平均Tick时间)
      */
     public static void onTickEnd(MinecraftServer server) {
 
+        ConfigManager cfg = ConfigManager.getInstance();
         double avgTickTime = server.getAverageTickTime();
-        boolean isIdle = avgTickTime / 1_000_000.0 < IDLE_THRESHOLD_MS;
+        boolean isIdle = avgTickTime / 1_000_000.0 < cfg.getIdleThresholdMs();
 
-                // ====================== 1. 强制保存模式 ======================
+        // ====================== 1. 强制保存模式 ======================
         if (forceSaving) {
             // 强制模式下只执行保存任务,每个Tick执行一个,不执行空闲任务
             if (saveTaskIndex < saveTasks.size()) {
@@ -417,7 +426,7 @@ public class IdleTickManager {
         }
 
         // ====================== 4. 间隔判断 ======================
-        if (ticksCounter >= MAX_INTERVAL_TICKS) {
+        if (ticksCounter >= cfg.getIdleMaxIntervalTicks()) {
             // 达到硬性最大间隔:无论是否空闲,进入强制保存模式
             // 重置索引到当前进度(与 saveCycleActive 状态一致)
             forceSaving = true;
@@ -447,7 +456,7 @@ public class IdleTickManager {
                 saveTaskIndex = 0;
                 ticksCounter = 0;
             }
-        } else if (isIdle && !saveCycleActive && ticksCounter >= TARGET_INTERVAL_TICKS) {
+        } else if (isIdle && !saveCycleActive && ticksCounter >= cfg.getIdleTargetIntervalTicks()) {
             // 空闲、不在保存循环中、达到理想间隔:启动保存循环
             // 前提:有保存任务可执行
             if (!saveTasks.isEmpty()) {

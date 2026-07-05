@@ -33,162 +33,166 @@ public class EntityQueryResult {
     public final Map<String, Map<String, Long>> dimTypeCounts = new LinkedHashMap<>();
 
     /**
-                 * 生成格式化聊天栏文本（适用于 Minecraft 聊天框）。
-                 * 默认显示：全局总数 → 全局类别分布 → 全局类型Top10 → 维度概览前5。
-                 * 跳过没有实体的维度。如需查看完整维度详情（每个维度类别/类型），请使用 toDetailedString()。
-                 *
-                 * @return 格式化的聊天组件（含 § 颜色代码）
-                 */
-                public Component toReadableString() {
-                    MutableComponent component = Component.literal("");
+     * 生成格式化聊天栏文本（适用于 Minecraft 聊天框）。
+     * 默认显示：全局总数 → 全局类别分布 → 全局类型Top10 → 维度概览前5。
+     * 跳过没有实体的维度。如需查看完整维度详情（每个维度类别/类型），请使用 toDetailedString()。
+     *
+     * @return 格式化的聊天组件（含 § 颜色代码）
+     */
+    public Component toReadableString() {
+        MutableComponent component = Component.literal("");
 
-                    // 标题
-                    component.append(Component.literal("§e=== [LingLens] 实体统计"));
-                    if (fromCache) {
-                        component.append(Component.literal(" §7(缓存)§e"));
-                    } else {
-                        component.append(Component.literal(" §7(即时扫描)§e"));
-                    }
-                    component.append(Component.literal(" ===\n"));
-
-                    // 全局总数
-                    component.append(Component.literal("§7总计: §f" + globalTotal + " 个实体\n"));
-
-                    // ── 全局类别统计（汇总所有维度） ──
-                    Map<EntityCategory, Long> globalCatCounts = new LinkedHashMap<>();
-                    for (Map<EntityCategory, Long> catMap : dimCatCounts.values()) {
-                        for (Map.Entry<EntityCategory, Long> entry : catMap.entrySet()) {
-                            globalCatCounts.merge(entry.getKey(), entry.getValue(), Long::sum);
-                        }
-                    }
-                    if (!globalCatCounts.isEmpty()) {
-                        component.append(Component.literal("§7全局类别分布:\n"));
-                        globalCatCounts.entrySet().stream()
-                                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-                                .forEach(catEntry -> {
-                                    String catName = getCategoryDisplayName(catEntry.getKey());
-                                    component.append(Component.literal("  §7- " + catName + ": §f" + catEntry.getValue() + "\n"));
-                                });
-                    }
-
-                    // ── 全局类型统计（汇总所有维度，Top 10） ──
-                    Map<String, Long> globalTypeCounts = new LinkedHashMap<>();
-                    for (Map<String, Long> typeMap : dimTypeCounts.values()) {
-                        for (Map.Entry<String, Long> entry : typeMap.entrySet()) {
-                            globalTypeCounts.merge(entry.getKey(), entry.getValue(), Long::sum);
-                        }
-                    }
-                    if (!globalTypeCounts.isEmpty()) {
-                        String Command = "/kill @e[type=";
-                        component.append(Component.literal("  §7└ §f主要类型:\n"));
-                        globalTypeCounts.entrySet().stream()
-                                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-                                .limit(8)
-                                .forEach(typeEntry -> {
-                                    String typeName = typeEntry.getKey().replace("minecraft:", "");
-                                    component.append(Component.literal("    §7- §f" + typeName + " §7× " + typeEntry.getValue() + "\n")
-                                    .setStyle(Style.EMPTY
-                        .withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT,Component.literal("杀")))
-                        .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND, Command+typeEntry.getKey()+"]"))));
-                                });
-                        if (globalTypeCounts.size() > 8) {
-                            component.append(Component.literal("  §8... 及其他 " + (globalTypeCounts.size() - 8) + " 种类型\n"));
-                        }
-                    }
-
-                    // ── 维度概览：按数量降序，最多显示5个有实体的维度 ──
-                    var sortedDimensions = dimensionTotals.entrySet().stream()
-                            .filter(e -> e.getValue() > 0)
-                            .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-                            .toList();
-
-                    if (!sortedDimensions.isEmpty()) {
-                        component.append(Component.literal("§7维度概览 (Top 5):\n"));
-                        int limit = Math.min(5, sortedDimensions.size());
-                        for (int i = 0; i < limit; i++) {
-                            Map.Entry<String, Long> entry = sortedDimensions.get(i);
-                            String dimName = entry.getKey();
-                            component.append(Component.literal("§6▸ §b" + dimName + " §7: §f" + entry.getValue() + " 个实体\n"));
-                        }
-                        int remaining = sortedDimensions.size() - limit;
-                        if (remaining > 0) {
-                            component.append(Component.literal("§8... 及其他 " + remaining + " 个维度\n"));
-                        }
-                    }
-
-                    // 缓存信息
-                    if (fromCache) {
-                        component.append(Component.literal("\n§7[缓存时间: " + formatTimestamp(cacheTime) + "]"));
-                    } else {
-                        component.append(Component.literal("\n§7[本次为即时扫描，缓存已自动重建]"));
-                    }
-
-                    return component;
-                }
-
-        /**
-         * 生成完整的维度详情文本，包含各维度类别和主要类型分布。
-         * 跳过没有实体的维度。此为 toReadableString() 的完整版本。
-         *
-         * @return 格式化的完整统计字符串
-         */
-        public String toDetailedString() {
-            StringBuilder sb = new StringBuilder();
-
-            sb.append("§e=== 灵棱枢 实体统计");
-            if (fromCache) {
-                sb.append(" §7(缓存)§e");
-            } else {
-                sb.append(" §7(即时扫描)§e");
-            }
-            sb.append(" ===\n");
-
-            sb.append("§7总计: §f").append(globalTotal).append(" 个实体\n");
-
-            for (Map.Entry<String, Long> dimEntry : dimensionTotals.entrySet()) {
-                String dimKey = dimEntry.getKey();
-                String dimName = dimKey.replace("minecraft:", "");
-                long dimCount = dimEntry.getValue();
-
-                if (dimCount <= 0) continue; // 跳过无实体的维度
-
-                sb.append("\n§6▸ §b").append(dimName).append(" §7: §f").append(dimCount).append(" 个实体\n");
-
-                Map<EntityCategory, Long> catMap = dimCatCounts.get(dimKey);
-                if (catMap != null && !catMap.isEmpty()) {
-                    catMap.entrySet().stream()
-                            .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
-                            .forEach(catEntry -> {
-                                String catName = getCategoryDisplayName(catEntry.getKey());
-                                long catCount = catEntry.getValue();
-                                sb.append("  §7- ").append(catName).append(": §f").append(catCount).append("\n");
-                            });
-                }
-
-                Map<String, Long> typeMap = dimTypeCounts.get(dimKey);
-                if (typeMap != null && !typeMap.isEmpty()) {
-                    sb.append("  §8└ 主要类型:\n");
-                    typeMap.entrySet().stream()
-                            .limit(5)
-                            .forEach(typeEntry -> {
-                                String typeName = typeEntry.getKey().replace("minecraft:", "");
-                                sb.append("    §7- §f").append(typeName)
-                                        .append(" §7× ").append(typeEntry.getValue()).append("\n");
-                            });
-                    if (typeMap.size() > 5) {
-                        sb.append("    §8... 及其他 ").append(typeMap.size() - 5).append(" 种类型\n");
-                    }
-                }
-            }
-
-            if (fromCache) {
-                sb.append("\n§7[缓存时间: ").append(formatTimestamp(cacheTime)).append("]");
-            } else {
-                sb.append("\n§7[本次为即时扫描，缓存已自动重建]");
-            }
-
-            return sb.toString();
+        // 标题
+        component.append(Component.literal("§e=== [LingLens] 实体统计"));
+        if (fromCache) {
+            component.append(Component.literal(" §7(缓存)§e"));
+        } else {
+            component.append(Component.literal(" §7(即时扫描)§e"));
         }
+        component.append(Component.literal(" ===\n"));
+
+        // 全局总数
+        component.append(Component.literal("§7总计: §f" + globalTotal + " 个实体\n"));
+
+        // ── 全局类别统计（汇总所有维度） ──
+        Map<EntityCategory, Long> globalCatCounts = new LinkedHashMap<>();
+        for (Map<EntityCategory, Long> catMap : dimCatCounts.values()) {
+            for (Map.Entry<EntityCategory, Long> entry : catMap.entrySet()) {
+                globalCatCounts.merge(entry.getKey(), entry.getValue(), Long::sum);
+            }
+        }
+        if (!globalCatCounts.isEmpty()) {
+            component.append(Component.literal("§7全局类别分布:\n"));
+            globalCatCounts.entrySet().stream()
+                    .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                    .forEach(catEntry -> {
+                        String catName = getCategoryDisplayName(catEntry.getKey());
+                        component.append(Component.literal("  §7- " + catName + ": §f" + catEntry.getValue() + "\n"));
+                    });
+        }
+
+        // ── 全局类型统计（汇总所有维度，Top 10） ──
+        Map<String, Long> globalTypeCounts = new LinkedHashMap<>();
+        for (Map<String, Long> typeMap : dimTypeCounts.values()) {
+            for (Map.Entry<String, Long> entry : typeMap.entrySet()) {
+                globalTypeCounts.merge(entry.getKey(), entry.getValue(), Long::sum);
+            }
+        }
+        if (!globalTypeCounts.isEmpty()) {
+            String Command = "/kill @e[type=";
+            component.append(Component.literal("  §7└ §f主要类型:\n"));
+            globalTypeCounts.entrySet().stream()
+                    .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                    .limit(8)
+                    .forEach(typeEntry -> {
+                        String typeName = typeEntry.getKey().replace("minecraft:", "");
+                        component.append(Component
+                                .literal("    §7- §f" + typeName + " §7× " + typeEntry.getValue() + "\n")
+                                .setStyle(Style.EMPTY
+                                        .withHoverEvent(
+                                                new HoverEvent(HoverEvent.Action.SHOW_TEXT, Component.literal("杀")))
+                                        .withClickEvent(new ClickEvent(ClickEvent.Action.SUGGEST_COMMAND,
+                                                Command + typeEntry.getKey() + "]"))));
+                    });
+            if (globalTypeCounts.size() > 8) {
+                component.append(Component.literal("  §8... 及其他 " + (globalTypeCounts.size() - 8) + " 种类型\n"));
+            }
+        }
+
+        // ── 维度概览：按数量降序，最多显示5个有实体的维度 ──
+        var sortedDimensions = dimensionTotals.entrySet().stream()
+                .filter(e -> e.getValue() > 0)
+                .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                .toList();
+
+        if (!sortedDimensions.isEmpty()) {
+            component.append(Component.literal("§7维度概览 (Top 5):\n"));
+            int limit = Math.min(5, sortedDimensions.size());
+            for (int i = 0; i < limit; i++) {
+                Map.Entry<String, Long> entry = sortedDimensions.get(i);
+                String dimName = entry.getKey();
+                component.append(Component.literal("§6▸ §b" + dimName + " §7: §f" + entry.getValue() + " 个实体\n"));
+            }
+            int remaining = sortedDimensions.size() - limit;
+            if (remaining > 0) {
+                component.append(Component.literal("§8... 及其他 " + remaining + " 个维度\n"));
+            }
+        }
+
+        // 缓存信息
+        if (fromCache) {
+            component.append(Component.literal("\n§7[缓存时间: " + formatTimestamp(cacheTime) + "]"));
+        } else {
+            component.append(Component.literal("\n§7[本次为即时扫描，缓存已自动重建]"));
+        }
+
+        return component;
+    }
+
+    /**
+     * 生成完整的维度详情文本，包含各维度类别和主要类型分布。
+     * 跳过没有实体的维度。此为 toReadableString() 的完整版本。
+     *
+     * @return 格式化的完整统计字符串
+     */
+    public String toDetailedString() {
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("§e=== 灵棱枢 实体统计");
+        if (fromCache) {
+            sb.append(" §7(缓存)§e");
+        } else {
+            sb.append(" §7(即时扫描)§e");
+        }
+        sb.append(" ===\n");
+
+        sb.append("§7总计: §f").append(globalTotal).append(" 个实体\n");
+
+        for (Map.Entry<String, Long> dimEntry : dimensionTotals.entrySet()) {
+            String dimKey = dimEntry.getKey();
+            String dimName = dimKey.replace("minecraft:", "");
+            long dimCount = dimEntry.getValue();
+
+            if (dimCount <= 0)
+                continue; // 跳过无实体的维度
+
+            sb.append("\n§6▸ §b").append(dimName).append(" §7: §f").append(dimCount).append(" 个实体\n");
+
+            Map<EntityCategory, Long> catMap = dimCatCounts.get(dimKey);
+            if (catMap != null && !catMap.isEmpty()) {
+                catMap.entrySet().stream()
+                        .sorted((a, b) -> Long.compare(b.getValue(), a.getValue()))
+                        .forEach(catEntry -> {
+                            String catName = getCategoryDisplayName(catEntry.getKey());
+                            long catCount = catEntry.getValue();
+                            sb.append("  §7- ").append(catName).append(": §f").append(catCount).append("\n");
+                        });
+            }
+
+            Map<String, Long> typeMap = dimTypeCounts.get(dimKey);
+            if (typeMap != null && !typeMap.isEmpty()) {
+                sb.append("  §8└ 主要类型:\n");
+                typeMap.entrySet().stream()
+                        .limit(5)
+                        .forEach(typeEntry -> {
+                            String typeName = typeEntry.getKey().replace("minecraft:", "");
+                            sb.append("    §7- §f").append(typeName)
+                                    .append(" §7× ").append(typeEntry.getValue()).append("\n");
+                        });
+                if (typeMap.size() > 5) {
+                    sb.append("    §8... 及其他 ").append(typeMap.size() - 5).append(" 种类型\n");
+                }
+            }
+        }
+
+        if (fromCache) {
+            sb.append("\n§7[缓存时间: ").append(formatTimestamp(cacheTime)).append("]");
+        } else {
+            sb.append("\n§7[本次为即时扫描，缓存已自动重建]");
+        }
+
+        return sb.toString();
+    }
 
     /**
      * 生成简短的统计概览（用于命令补全提示或嵌入综合消息）。
