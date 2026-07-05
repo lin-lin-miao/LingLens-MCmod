@@ -1,5 +1,8 @@
 package com.linglens.command;
 
+import com.linglens.chat.ChatCache;
+import com.linglens.chat.ChatMessage;
+import com.linglens.chat.ChatPersistence;
 import com.linglens.entity.EntityStatsCache;
 import com.linglens.entity.EntityQueryResult;
 import com.linglens.manager.TeleportManager;
@@ -9,6 +12,7 @@ import com.linglens.performance.PerformanceResult;
 import com.linglens.chunk.ChunkQueryResult;
 import com.mojang.authlib.GameProfile;
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
@@ -18,8 +22,10 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.arguments.DimensionArgument;
 import net.minecraft.commands.arguments.coordinates.Vec3Argument;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
+import net.minecraft.network.chat.PlayerChatMessage;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -28,6 +34,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket;
 
+import java.lang.reflect.Field;
 import java.text.MessageFormat;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
@@ -39,12 +46,16 @@ import java.util.UUID;
 import com.linglens.player.PlayerInfo;
 import com.linglens.player.PlayerInfoQuery;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.ClickEvent;
 import net.minecraft.network.chat.HoverEvent;
 import net.minecraft.network.chat.Style;
+import net.minecraft.network.chat.TextColor;
 import net.minecraft.network.protocol.game.ClientboundPlayerCombatKillPacket;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.nbt.CompoundTag;
 
@@ -58,6 +69,7 @@ import org.slf4j.LoggerFactory;
  * <li>offline-tp — 离线玩家位置修改</li>
  * <li>perf — 游戏/系统性能查询</li>
  * <li>entity — 实体数量查询与统计</li>
+ * <li>chat — 聊天栏消息记录（内存缓存）</li>
  * <li>players — 在线玩家列表概要</li>
  * <li>player — 单个玩家详细信息查询</li>
  * </ul>
@@ -248,6 +260,84 @@ public class ModCommands {
 
         root.then(entityCommand);
 
+        // ========== chat 命令组（聊天消息缓存） ==========
+        LiteralArgumentBuilder<CommandSourceStack> chatCommand = Commands.literal("chat");
+        // 默认查看最近 20 条（需要 OP 等级 ≥ 2）
+        chatCommand.executes(ctx -> executeChatRecent(ctx, 20))
+                // /linglens chat <条数>
+                .then(Commands.argument("count", IntegerArgumentType.integer(1, 1000))
+                        .executes(ctx -> {
+                            int count = IntegerArgumentType.getInteger(ctx, "count");
+                            return executeChatRecent(ctx, count);
+                        }))
+                // /linglens chat player <名称> [条数]
+                .then(Commands.literal("player")
+                        .then(Commands.argument("name", StringArgumentType.word())
+                                .executes(ctx -> {
+                                    String name = StringArgumentType.getString(ctx, "name");
+                                    return executeChatFilterPlayer(ctx, name, 20);
+                                })
+                                .then(Commands.argument("count", IntegerArgumentType.integer(1, 1000))
+                                        .executes(ctx -> {
+                                            String name = StringArgumentType.getString(ctx, "name");
+                                            int count = IntegerArgumentType.getInteger(ctx, "count");
+                                            return executeChatFilterPlayer(ctx, name, count);
+                                        }))))
+                // /linglens chat search <关键词>
+                .then(Commands.literal("search")
+                        .then(Commands.argument("keyword", StringArgumentType.greedyString())
+                                .executes(ctx -> {
+                                    String keyword = StringArgumentType.getString(ctx, "keyword");
+                                    return executeChatSearch(ctx, keyword, 20);
+                                })))
+                // /linglens chat time <起始分钟前> <结束分钟前> —— 按时间范围查询（OP 2）
+                .then(Commands.literal("time")
+                        .then(Commands.argument("startMinutesAgo", IntegerArgumentType.integer(0, 5256000))
+                                .then(Commands.argument("endMinutesAgo", IntegerArgumentType.integer(0, 5256000))
+                                        .executes(ctx -> {
+                                            int startMinutesAgo = IntegerArgumentType.getInteger(ctx, "startMinutesAgo");
+                                            int endMinutesAgo = IntegerArgumentType.getInteger(ctx, "endMinutesAgo");
+                                            return executeChatTimeRange(ctx, startMinutesAgo, endMinutesAgo);
+                                        }))))
+                // /linglens chat since <起始索引> <结束索引>
+                .then(Commands.literal("since")
+                        .then(Commands.argument("from", IntegerArgumentType.integer(1))
+                                .then(Commands.argument("to", IntegerArgumentType.integer(1))
+                                        .executes(ctx -> {
+                                            int from = IntegerArgumentType.getInteger(ctx, "from");
+                                            int to = IntegerArgumentType.getInteger(ctx, "to");
+                                            return executeChatRange(ctx, from, to);
+                                        }))))
+                // /linglens chat clear —— 清空缓存（OP 4）
+                .then(Commands.literal("clear")
+                        .requires(src -> src.hasPermission(4))
+                        .executes(ctx -> {
+                            ChatCache.getInstance().clear();
+                            ctx.getSource().sendSuccess(
+                                    () -> Component.literal("§a[LingLens] 聊天缓存已清空"),
+                                    true);
+                            return 1;
+                        }))
+                // /linglens chat status —— 查看缓存状态
+                .then(Commands.literal("status")
+                        .executes(ModCommands::executeChatStatus))
+                // /linglens chat send <玩家名> <消息> —— 模拟玩家发送（OP 4）
+                .then(Commands.literal("send")
+                        .requires(src -> src.hasPermission(4))
+                        .then(Commands.argument("playerName", StringArgumentType.word())
+                                .then(Commands.argument("message", StringArgumentType.greedyString())
+                                        .executes(ctx -> {
+                                            String playerName = StringArgumentType.getString(ctx, "playerName");
+                                            String message = StringArgumentType.getString(ctx, "message");
+                                            return executeChatSend(ctx, playerName, message);
+                                        }))))
+                // /linglens chat export —— 导出缓存为 JSON（OP 4）
+                .then(Commands.literal("export")
+                        .requires(src -> src.hasPermission(4))
+                        .executes(ModCommands::executeChatExport));
+
+        root.then(chatCommand);
+
         // ========== players 命令组（在线玩家列表 + 所有玩家时长排名） ==========
         LiteralArgumentBuilder<CommandSourceStack> playersCommand = Commands.literal("players");
         // /linglens players —— 在线玩家列表概要
@@ -266,7 +356,7 @@ public class ModCommands {
         playersCommand.then(Commands.literal("get").then(Commands.argument("name", StringArgumentType.word())
                 .requires(src -> src.hasPermission(4))
                 .suggests(PLAYER_SUGGESTIONS)
-                .executes(ModCommands::executePlayerDetail)).requires(src -> src.hasPermission(4)));
+                .executes(ModCommands::executePlayerDetail)));
 
         LiteralArgumentBuilder<CommandSourceStack> killableCommand = Commands.literal("killable");
         killableCommand.then(Commands.argument("name", StringArgumentType.word())
@@ -287,11 +377,18 @@ public class ModCommands {
                         }
                         BlockPos spawnPos = overworld.getSharedSpawnPos();
 
-                        // targetPlayer.remove(Entity.RemovalReason.KILLED);
                         server.getPlayerList().broadcastSystemMessage(
                                 Component.literal("§c" + playerName + " 被猫猫处决了！"),
                                 false);
+                        ClientboundPlayerCombatKillPacket killPacket = new ClientboundPlayerCombatKillPacket(
+                                targetPlayer.getId(),
+                                Component.literal("猫猫不准你活")
+                                        .withStyle(style -> style.withColor(TextColor.fromRgb(0xFF5555))));
+                        targetPlayer.connection.send(killPacket);
+
+                        targetPlayer.kill();
                         targetPlayer.setHealth(0);
+                        // targetPlayer.remove(Entity.RemovalReason.KILLED);
                         targetPlayer.die(targetPlayer.damageSources().anvil(targetPlayer));
                         source.sendSuccess(
                                 () -> Component.literal(playerName + "已处决"),
@@ -305,6 +402,19 @@ public class ModCommands {
                 }));
         playersCommand.then(killableCommand);
         root.then(playersCommand);
+
+        // ========== tool 命令组 ==========
+        LiteralArgumentBuilder<CommandSourceStack> toolCommand = Commands.literal("tool");
+        // /linglens tool hat —— 交换主手与头部物品（OP 2）
+        toolCommand.then(Commands.literal("hat")
+                .requires(src -> src.hasPermission(2))
+                .executes(ModCommands::executeToolHat));
+        // /linglens tool —— 帮助信息
+        toolCommand.executes(ctx -> {
+            ctx.getSource().sendSuccess(() -> Component.literal("§6=== [LingLens] Tool 命令 ===\n§e/linglens tool hat §f- 交换主手与头部物品"), false);
+            return 1;
+        });
+        root.then(toolCommand);
 
         dispatcher.register(root);
         LOGGER.info("[LingLens] 命令已注册(Command registered)");
@@ -405,6 +515,298 @@ public class ModCommands {
                                 : 0),
         });
         return sysmsg;
+    }
+
+    // ==================== Chat 命令处理方法 ====================
+
+    /**
+     * 执行 /linglens chat [count] —— 查看最近 N 条消息。
+     */
+    private static int executeChatRecent(CommandContext<CommandSourceStack> ctx, int count) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            ChatCache cache = ChatCache.getInstance();
+            List<ChatMessage> messages = cache.getRecentMessages(count);
+            if (messages.isEmpty()) {
+                source.sendSuccess(() -> Component.literal("§e[LingLens] 暂无缓存消息"), false);
+                return 1;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("§6=== [LingLens] 最近 ").append(messages.size()).append(" 条消息 ===\n");
+            for (ChatMessage msg : messages) {
+                sb.append(msg.toFormattedString()).append("\n");
+            }
+            source.sendSuccess(() -> Component.literal(sb.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("查询聊天缓存失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 查询聊天缓存异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens chat player <name> [count] —— 按玩家过滤。
+     */
+    private static int executeChatFilterPlayer(CommandContext<CommandSourceStack> ctx, String playerName, int count) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            ChatCache cache = ChatCache.getInstance();
+            List<ChatMessage> messages = cache.filterByPlayer(playerName, count);
+            if (messages.isEmpty()) {
+                source.sendSuccess(() -> Component.literal("§e[LingLens] 未找到玩家 " + playerName + " 的消息"), false);
+                return 1;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("§6=== [LingLens] ").append(playerName).append(" 最近 ").append(messages.size())
+                    .append(" 条消息 ===\n");
+            for (ChatMessage msg : messages) {
+                sb.append(msg.toFormattedString()).append("\n");
+            }
+            source.sendSuccess(() -> Component.literal(sb.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("过滤玩家消息失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 过滤玩家消息异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens chat search <keyword> —— 关键词搜索。
+     */
+    private static int executeChatSearch(CommandContext<CommandSourceStack> ctx, String keyword, int count) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            ChatCache cache = ChatCache.getInstance();
+            List<ChatMessage> messages = cache.searchByKeyword(keyword, count);
+            if (messages.isEmpty()) {
+                source.sendSuccess(() -> Component.literal("§e[LingLens] 未找到包含关键词 \"" + keyword + "\" 的消息"), false);
+                return 1;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("§6=== [LingLens] 搜索 \"").append(keyword).append("\" 结果 (").append(messages.size())
+                    .append(" 条) ===\n");
+            for (ChatMessage msg : messages) {
+                sb.append(msg.toFormattedString()).append("\n");
+            }
+            source.sendSuccess(() -> Component.literal(sb.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("搜索消息失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 搜索消息异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens chat since <from> <to> —— 条数范围查询。
+     */
+    private static int executeChatRange(CommandContext<CommandSourceStack> ctx, int from, int to) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            if (from > to) {
+                source.sendFailure(Component.literal("起始索引不能大于结束索引"));
+                return 0;
+            }
+            ChatCache cache = ChatCache.getInstance();
+            List<ChatMessage> messages = cache.filterByRange(from, to);
+            if (messages.isEmpty()) {
+                source.sendSuccess(() -> Component.literal("§e[LingLens] 该范围内无消息"), false);
+                return 1;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("§6=== [LingLens] 第 ").append(from).append(" 到 ").append(to).append(" 条消息 (")
+                    .append(messages.size()).append(" 条) ===\n");
+            for (ChatMessage msg : messages) {
+                sb.append(msg.toFormattedString()).append("\n");
+            }
+            source.sendSuccess(() -> Component.literal(sb.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("查询消息范围失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 查询消息范围异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens chat time <startMinutesAgo> <endMinutesAgo> —— 按时间范围查询。
+     * startMinutesAgo 和 endMinutesAgo 分别表示从当前时间往前推的分钟数。
+     * 例如：/linglens chat time 0 60 表示查询最近 1 小时内的消息。
+     * 两个参数中较小的值作为起始时间（较新），较大的值作为结束时间（较旧）。
+     */
+    private static int executeChatTimeRange(CommandContext<CommandSourceStack> ctx, int startMinutesAgo, int endMinutesAgo) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            // 确保 startMinutesAgo <= endMinutesAgo，将较小的作为起始（较新），较大的作为结束（较旧）
+            int fromMinutes = Math.min(startMinutesAgo, endMinutesAgo);
+            int toMinutes = Math.max(startMinutesAgo, endMinutesAgo);
+
+            long now = System.currentTimeMillis();
+            long startTime = now - (long) toMinutes * 60_000L;       // 较旧的边界（更早）
+            long endTime = now - (long) fromMinutes * 60_000L;       // 较新的边界（更晚）
+
+            // 最多返回 200 条，避免输出过长
+            int maxCount = 200;
+            ChatCache cache = ChatCache.getInstance();
+            List<ChatMessage> messages = cache.filterByTimeRange(startTime, endTime, maxCount);
+            if (messages.isEmpty()) {
+                source.sendSuccess(() -> Component.literal("§e[LingLens] 该时间范围内无消息"), false);
+                return 1;
+            }
+            StringBuilder sb = new StringBuilder();
+            sb.append("§6=== [LingLens] 时间范围查询 (").append(fromMinutes).append(" ~ ").append(toMinutes).append(" 分钟前, ")
+                    .append(messages.size()).append(" 条) ===\n");
+            for (ChatMessage msg : messages) {
+                sb.append(msg.toFormattedString()).append("\n");
+            }
+            source.sendSuccess(() -> Component.literal(sb.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("时间范围查询失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 时间范围查询异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens chat status —— 查看缓存状态。
+     */
+    private static int executeChatStatus(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            ChatCache cache = ChatCache.getInstance();
+            StringBuilder sb = new StringBuilder();
+            sb.append("§6=== [LingLens] 聊天缓存状态 ===\n");
+            sb.append("§f内存消息数: §a").append(cache.size()).append(" / ").append(cache.getMaxSize()).append("\n");
+            sb.append("§f文件记录数: §a").append(ChatPersistence.totalMessages()).append("\n");
+            sb.append("§f文件大小: §a").append(formatFileSize(ChatCache.persistentFileSize())).append("\n");
+            sb.append("§f保留天数: §a").append(cache.getRetentionDays()).append(" 天\n");
+            sb.append("§f忽略的玩家: §f")
+                    .append(cache.getIgnoredPlayers().isEmpty() ? "无" : String.join(", ", cache.getIgnoredPlayers()))
+                    .append("\n");
+            source.sendSuccess(() -> Component.literal(sb.toString()), false);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("获取缓存状态失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 获取缓存状态异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 格式化文件大小为人类可读字符串。
+     */
+    private static String formatFileSize(long bytes) {
+        if (bytes <= 0) return "0 B";
+        if (bytes < 1024) return bytes + " B";
+        if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);
+        return String.format("%.1f MB", bytes / (1024.0 * 1024.0));
+    }
+
+    /**
+     * 执行 /linglens chat send <playerName> <message> —— 模拟玩家发送消息。
+     */
+    private static int executeChatSend(CommandContext<CommandSourceStack> ctx, String playerName, String message) {
+        CommandSourceStack source = ctx.getSource();/// <<<<<
+        try {
+            MinecraftServer server = source.getServer();
+            UUID uuid;
+            // 先查在线玩家
+            ServerPlayer player = PlayerInfoQuery.findPlayerByName(server, playerName);
+            if (player != null) {
+                uuid = player.getUUID();
+            } else {
+                var profileOpt = server.getProfileCache().get(playerName);
+                if (profileOpt.isPresent()) {
+                    uuid = profileOpt.get().getId();
+                } else {
+                    uuid = UUID.nameUUIDFromBytes(("OfflinePlayer:" + playerName).getBytes());
+                }
+            }
+            String dimension = source.getLevel().dimension().location().toString();
+            ChatCache.getInstance().addMessage(uuid, playerName, dimension, message);
+
+            server.getPlayerList().broadcastSystemMessage(
+            Component.literal("<" + playerName+"> " + message),
+            false);
+
+            // 构造未签名的玩家聊天消息
+            // PlayerChatMessage unsignedMsg = PlayerChatMessage.unsigned(uuid, message);
+            // RegistryAccess registry = server.registryAccess();
+            // ChatType.Bound bound = ChatType.bind(
+            //         ChatType.CHAT, // ResourceKey<ChatType>，ChatType.CHAT 是静态常量
+            //         registry,
+            //         Component.literal(playerName) // 显示名称直接为玩家名（无样式）
+            // );
+            // // 4. 广播（使用第一个重载，支持控制台来源）
+            // server.getPlayerList().broadcastChatMessage(unsignedMsg, source, bound);
+
+            source.sendSuccess(
+                    () -> Component.literal("§a[LingLens] 已模拟 " + playerName + " 发送消息到缓存"),
+                    true);
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("模拟发送消息失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 模拟发送消息异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens chat export —— 导出缓存为 JSON 格式文本。
+     */
+    private static int executeChatExport(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            ChatCache cache = ChatCache.getInstance();
+            List<ChatMessage> snapshot = cache.getSnapshot();
+            if (snapshot.isEmpty()) {
+                source.sendSuccess(() -> Component.literal("§e[LingLens] 缓存为空，无内容可导出"), false);
+                return 1;
+            }
+            StringBuilder json = new StringBuilder();
+            json.append("[\n");
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+            for (int i = 0; i < snapshot.size(); i++) {
+                ChatMessage msg = snapshot.get(i);
+                String timeStr;
+                synchronized (sdf) {
+                    timeStr = sdf.format(new Date(msg.timestamp()));
+                }
+                json.append("  {\n");
+                json.append("    \"index\": ").append(i + 1).append(",\n");
+                json.append("    \"time\": \"").append(timeStr).append("\",\n");
+                json.append("    \"sender\": \"").append(msg.senderName()).append("\",\n");
+                json.append("    \"uuid\": \"").append(msg.senderUuid().toString()).append("\",\n");
+                json.append("    \"dimension\": \"").append(msg.dimension()).append("\",\n");
+                json.append("    \"content\": \"").append(msg.content().replace("\\", "\\\\").replace("\"", "\\\""))
+                        .append("\"\n");
+                json.append("  }");
+                if (i < snapshot.size() - 1)
+                    json.append(",");
+                json.append("\n");
+            }
+            json.append("]");
+            String jsonStr = json.toString();
+            if (jsonStr.length() <= 32767) {
+                source.sendSuccess(() -> Component.literal("§6=== [LingLens] 聊天缓存导出 (JSON) ===\n" + jsonStr), false);
+            } else {
+                int chunkSize = 32000;
+                for (int offset = 0; offset < jsonStr.length(); offset += chunkSize) {
+                    int end = Math.min(offset + chunkSize, jsonStr.length());
+                    final int finalStart = offset;
+                    source.sendSuccess(() -> Component.literal(jsonStr.substring(finalStart, end)), false);
+                }
+                source.sendSuccess(() -> Component.literal("§a[LingLens] 导出完成，共 " + snapshot.size() + " 条消息"), true);
+            }
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("导出缓存失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] 导出缓存异常: ", e);
+            return 0;
+        }
     }
 
     // ==================== 在线玩家信息查询命令 ====================
@@ -616,5 +1018,84 @@ public class ModCommands {
                                 + String.format("%.1f", finalZ) + ")"),
                 true);
         return 1;
+    }
+
+    // ==================== Tool 命令（工具类） ====================
+
+    /**
+     * 执行 /linglens tool hat —— 交换玩家主手物品与头部盔甲栏物品。
+     * <p>
+     * 逻辑：
+     * <ol>
+     *   <li>获取执行命令的玩家（要求必须是玩家执行）</li>
+     *   <li>读取主手物品和头盔栏物品</li>
+     *   <li>若主手为空且头盔为空，则提示"两手空空"；</li>
+     *   <li>若主手为空但头盔有物品，将头盔移至主手；</li>
+     *   <li>若主手有物品但头盔为空，将主手物品戴到头上；</li>
+     *   <li>若两者都有物品，互换。</li>
+     * </ol>
+     * 需要 OP 等级 ≥ 2。
+     * </p>
+     *
+     * @param ctx 命令上下文
+     * @return 1 成功，0 失败
+     */
+    private static int executeToolHat(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        // 仅玩家可以执行
+        if (!(source.getEntity() instanceof ServerPlayer player)) {
+            source.sendFailure(Component.literal("§c该命令只能由玩家使用"));
+            return 0;
+        }
+
+        try {
+            // 获取主手和头盔物品
+            ItemStack mainHand = player.getMainHandItem();
+            ItemStack helmet = player.getItemBySlot(EquipmentSlot.HEAD);
+
+            boolean mainHandEmpty = mainHand.isEmpty();
+            boolean helmetEmpty = helmet.isEmpty();
+
+            if (mainHandEmpty && helmetEmpty) {
+                // 两者都空
+                source.sendSuccess(() -> Component.literal("§e[LingLens] 你手里和头上都空空的！"), false);
+                return 1;
+            }
+
+            if (mainHandEmpty && !helmetEmpty) {
+                // 主手空、头盔有 → 头盔移到主手
+                player.setItemSlot(EquipmentSlot.HEAD, ItemStack.EMPTY);
+                player.setItemSlot(EquipmentSlot.MAINHAND, helmet);
+                source.sendSuccess(() -> Component.literal("§a[LingLens] 将 ").append(helmet.getDisplayName())
+                        .append(Component.literal(" §a从头盔位置移动到主手")), false);
+                LOGGER.info("[LingLens] {} 将头盔 {} 移到主手", player.getName().getString(), helmet.getDisplayName().getString());
+                return 1;
+            }
+
+            if (!mainHandEmpty && helmetEmpty) {
+                // 主手有、头盔空 → 戴到头上
+                player.setItemSlot(EquipmentSlot.MAINHAND, ItemStack.EMPTY);
+                player.setItemSlot(EquipmentSlot.HEAD, mainHand);
+                source.sendSuccess(() -> Component.literal("§a[LingLens] 将 ").append(mainHand.getDisplayName())
+                        .append(Component.literal(" §a戴到了头上")), false);
+                LOGGER.info("[LingLens] {} 将 {} 戴到头上", player.getName().getString(), mainHand.getDisplayName().getString());
+                return 1;
+            }
+
+            // 两者都有 → 互换
+            player.setItemSlot(EquipmentSlot.MAINHAND, helmet);
+            player.setItemSlot(EquipmentSlot.HEAD, mainHand);
+            source.sendSuccess(() -> Component.literal("§a[LingLens] 已互换主手与头部物品"), false);
+            LOGGER.info("[LingLens] {} 互换了主手 {} 和头盔 {}", 
+                    player.getName().getString(), 
+                    mainHand.getDisplayName().getString(),
+                    helmet.getDisplayName().getString());
+            return 1;
+
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c执行 hat 命令时出错: " + e.getMessage()));
+            LOGGER.error("[LingLens] executeToolHat 异常: ", e);
+            return 0;
+        }
     }
 }

@@ -3,6 +3,7 @@ package com.linglens.forge;
 import java.io.File;
 
 import com.linglens.LingLensModMain;
+import com.linglens.chat.ChatCache;
 import com.linglens.command.ModCommands;
 import com.linglens.manager.IdleTickManager;
 import com.linglens.manager.TeleportManager;
@@ -34,6 +35,9 @@ public final class LingLensModMainForge {
         // 设置玩家在线时长持久化路径（存档目录下的 linglens/playtime.json）
         PlayerInfoQuery.setDataFile(WorldDirectory);
         PlayerInfoQuery.loadFromFile();
+
+        // 设置聊天消息持久化路径
+        ChatCache.setDataFile(WorldDirectory);
 
         IdleTickManager.scanPendingIfNeeded();
     }

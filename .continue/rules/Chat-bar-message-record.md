@@ -2,9 +2,6 @@
 description: Chat bar message record
 ---
 # **注意！** **禁止直接使用本篇的代码**
-
-
-
 功能七：聊天栏消息记录（内存缓存）
 1. 功能定义
 功能点	说明
@@ -24,9 +21,9 @@ description: Chat bar message record
 6	测试	在游戏中发送消息，验证缓存、查询、淘汰机制
 3. 核心实现原理
 3.1 数据结构选择：环形队列（Queue）
-使用 LinkedList 作为底层存储，配合容量限制实现 FIFO 自动淘汰：
 
-新消息入队时，若队列已满（size() >= maxSize），先 poll() 移除最旧消息，再 offer() 添加新消息。
+
+新消息入队时，若队列已满（size() >= maxSize），移除最旧消息，再 添加新消息。
 
 线程安全：使用 Collections.synchronizedList 或 ReentrantReadWriteLock 保证并发安全。
 
@@ -43,10 +40,11 @@ description: Chat bar message record
 加载器	事件类	监听方式
 Fabric	ServerChatEvents.CHAT	在模组初始化时注册事件
 Forge	ServerChatEvent（net.minecraftforge.event.ServerChatEvent）	使用 @SubscribeEvent 监听
-NeoForge	同 Forge（事件包名可能略有不同）	使用 @SubscribeEvent 监听
+(NeoForge未有)	同 Forge（事件包名可能略有不同）	使用 @SubscribeEvent 监听
 两者均能获取 ServerPlayer（发送者）和 Component（消息内容）。
+获取所有在聊天栏中的公共内容，包括玩家进出，玩家成就，死亡消息，系统消息，聊天消息等
 
-4. 代码结构（分模块）
+1. 代码结构（分模块）
 4.1 common 模块：消息数据模型
 4.3 common 模块：命令注册
 4.4 事件监听器（平台实现）
@@ -83,7 +81,11 @@ chat_cache_max_size=500
 
   扩展功能	说明
 按玩家过滤	/linglens chat player <名称> 只显示某玩家的消息
-按关键词搜索	/linglens chat search <关键词> 搜索包含关键词的消息
+按关键词搜索	/linglens chat search <关键词> 搜索包含关键词的消息(可选)
 时间范围查询	/linglens chat since <时间> <时间> 查询指定时间到指定时间的消息
 条数范围查询	/linglens chat since <n> <m> 查询n-m的消息
 消息导出	/linglens chat export 将缓存导出为 JSON 文件（需要持久化权限）
+
+过滤器 可选择添加一种或多种的过滤
+
+模仿玩家发送消息 /linglens chat send <玩家名> <消息>  用于外部接入

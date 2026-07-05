@@ -8,6 +8,7 @@ import net.minecraft.world.level.storage.LevelResource;
 import java.io.File;
 
 import com.linglens.LingLensModMain;
+import com.linglens.chat.ChatCache;
 import com.linglens.command.ModCommands;
 import com.linglens.manager.TeleportManager;
 import com.linglens.manager.IdleTickManager;
@@ -20,6 +21,7 @@ public final class LingLensModMainFabric implements ModInitializer {
 
         FabricEntityEventListener.register();
         FabricPlayerEventListener.register();
+        FabricChatEventListener.register(); // 注册聊天消息事件监听器
 
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             File WorldDirectory = server.getWorldPath(LevelResource.ROOT).toFile();
@@ -31,6 +33,10 @@ public final class LingLensModMainFabric implements ModInitializer {
             // 设置玩家在线时长持久化路径（存档目录下的 linglens/playtime.json）
             PlayerInfoQuery.setDataFile(WorldDirectory);
             PlayerInfoQuery.loadFromFile();
+
+            // 设置聊天消息持久化路径
+            ChatCache.setDataFile(WorldDirectory);
+
             IdleTickManager.scanPendingIfNeeded();
         });
 
