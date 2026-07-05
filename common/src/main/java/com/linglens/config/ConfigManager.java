@@ -45,7 +45,7 @@ public class ConfigManager {
 
     // ----- EntityStatsCache -----
     /** 事件风暴阈值：每秒事件数超过此值则视为事件风暴，缓存自动降级为 DIRTY */
-    private volatile long eventStormThreshold = 2000L;
+    private volatile long eventStormThreshold = 1000L;
 
     /** 事件风暴检测间隔（毫秒） */
     private volatile long checkIntervalMs = 1000L;

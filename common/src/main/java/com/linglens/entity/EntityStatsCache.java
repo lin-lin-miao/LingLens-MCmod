@@ -95,9 +95,9 @@ public class EntityStatsCache {
     public void onEntityJoin(Entity entity) {
         if (!shouldTrack(entity))
             return;
-        eventJoinCounter.incrementAndGet();
-        checkEventStorm();
         if (state.get() == State.READY) {
+            eventJoinCounter.incrementAndGet();
+            checkEventStorm();
             doJoinUpdate(entity);
         }
     }
@@ -108,9 +108,9 @@ public class EntityStatsCache {
     public void onEntityLeave(Entity entity) {
         if (!shouldTrack(entity))
             return;
-        eventLeaveCounter.incrementAndGet();
-        checkEventStorm();
         if (state.get() == State.READY) {
+            eventLeaveCounter.incrementAndGet();
+            checkEventStorm();
             doLeaveUpdate(entity);
         }
     }

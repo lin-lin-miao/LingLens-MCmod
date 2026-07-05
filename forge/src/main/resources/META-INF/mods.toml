@@ -9,7 +9,8 @@ version = "${version}"
 displayName = "LingLens"
 authors = "lin-lin-miao"
 description = '''
-This is an example description! Tell everyone what your mod is about!
+LingLens提供 离线玩家传送、性能监控、实体统计、聊天缓存、玩家查询 等实用功能。
+LingLens provides practical features such as offline player teleportation, performance monitoring, entity statistics, chat caching, and player queries.
 '''
 #logoFile = ""
 

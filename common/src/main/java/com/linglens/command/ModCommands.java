@@ -355,12 +355,16 @@ public class ModCommands {
                     return 1;
                 }));
         // ========== player 命令（单个玩家详细信息） ==========
-        playersCommand.then(Commands.literal("get").then(Commands.argument("name", StringArgumentType.word())
-                .requires(src -> src.hasPermission(4))
-                .suggests(PLAYER_SUGGESTIONS)
-                .executes(ModCommands::executePlayerDetail)));
+        playersCommand.then(Commands.literal("get")
 
-        LiteralArgumentBuilder<CommandSourceStack> killableCommand = Commands.literal("killable");
+                .requires(src -> src.hasPermission(4))
+                .then(Commands.argument("name", StringArgumentType.word())
+                        .requires(src -> src.hasPermission(4))
+                        .suggests(PLAYER_SUGGESTIONS)
+                        .executes(ModCommands::executePlayerDetail)));
+
+        LiteralArgumentBuilder<CommandSourceStack> killableCommand = Commands.literal("killable")
+                .requires(src -> src.hasPermission(4));
         killableCommand.then(Commands.argument("name", StringArgumentType.word())
                 .requires(src -> src.hasPermission(4))
                 .suggests(PLAYER_SUGGESTIONS)
@@ -409,7 +413,6 @@ public class ModCommands {
         LiteralArgumentBuilder<CommandSourceStack> toolCommand = Commands.literal("tool");
         // /linglens tool hat —— 交换主手与头部物品（OP 2）
         toolCommand.then(Commands.literal("hat")
-                .requires(src -> src.hasPermission(2))
                 .executes(ModCommands::executeToolHat));
         // /linglens tool —— 帮助信息
         toolCommand.executes(ctx -> {
@@ -420,7 +423,8 @@ public class ModCommands {
         root.then(toolCommand);
 
         // ========== config 命令组（配置文件管理） ==========
-        LiteralArgumentBuilder<CommandSourceStack> configCommand = Commands.literal("config");
+        LiteralArgumentBuilder<CommandSourceStack> configCommand = Commands.literal("config")
+                .requires(src -> src.hasPermission(4));
 
         // /linglens config —— 查看所有配置项（OP 2）
         configCommand.executes(ctx -> {
