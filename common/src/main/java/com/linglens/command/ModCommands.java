@@ -495,10 +495,29 @@ public class ModCommands {
         root.then(configCommand);
 
         // ========== list 命令(JSON 序列化输出服务器综合信息) ==========
-        LiteralArgumentBuilder<CommandSourceStack> listCommand = Commands.literal("list")
-                .requires(src -> src.hasPermission(2))
-                .executes(ModCommands::executeList);
-        root.then(listCommand);
+                LiteralArgumentBuilder<CommandSourceStack> listCommand = Commands.literal("list")
+                        .requires(src -> src.hasPermission(2))
+                        // /linglens list —— 综合信息(所有模块)
+                        .executes(ModCommands::executeList)
+                        // /linglens list system —— 仅系统性能(JSON)
+                        .then(Commands.literal("system")
+                                .executes(ModCommands::executeListSystem))
+                        // /linglens list perf —— 仅游戏性能(JSON)
+                        .then(Commands.literal("perf")
+                                .executes(ModCommands::executeListPerf))
+                        // /linglens list entity —— 仅实体统计(JSON)
+                        .then(Commands.literal("entity")
+                                .executes(ModCommands::executeListEntity))
+                        // /linglens list players —— 仅在线玩家(JSON)
+                        .then(Commands.literal("players")
+                                .executes(ModCommands::executeListPlayers))
+                        // /linglens list chunks —— 仅区块信息(JSON)
+                        .then(Commands.literal("chunks")
+                                .executes(ModCommands::executeListChunks))
+                        // /linglens list network —— 仅网络流量(JSON)
+                        .then(Commands.literal("network")
+                                .executes(ModCommands::executeListNetwork));
+                root.then(listCommand);
 
         // ========== network 命令组(网络流量统计) ==========
         LiteralArgumentBuilder<CommandSourceStack> networkCommand = Commands.literal("network")
@@ -1324,11 +1343,23 @@ public class ModCommands {
             root.addProperty("onlinePlayerCount", players.size());
             root.addProperty("maxPlayers", server.getMaxPlayers());
 
-            // ---- 区块信息 ----
+                        // ---- 区块信息 ----
             JsonObject chunk = new JsonObject();
             chunk.addProperty("totalLoaded", chunkResult.getTotalLoaded());
             chunk.addProperty("totalForced", chunkResult.getTotalForced());
             root.add("chunks", chunk);
+
+            // ---- 网络流量 ----
+            NetworkTrafficStats netStats = NetworkTrafficStats.getInstance();
+            JsonObject network = new JsonObject();
+            network.addProperty("uploadPackets", netStats.getGlobalUploadPackets());
+            network.addProperty("uploadBytes", netStats.getGlobalUploadBytes());
+            network.addProperty("downloadPackets", netStats.getGlobalDownloadPackets());
+            network.addProperty("downloadBytes", netStats.getGlobalDownloadBytes());
+            network.addProperty("averageUploadSpeedBps", Math.round(netStats.getGlobalAverageUploadSpeed() * 100.0) / 100.0);
+            network.addProperty("averageDownloadSpeedBps", Math.round(netStats.getGlobalAverageDownloadSpeed() * 100.0) / 100.0);
+            network.addProperty("trackedPlayerCount", netStats.getTrackedPlayerCount());
+            root.add("network", network);
 
             // ---- 时间戳 ----
             root.addProperty("timestamp", System.currentTimeMillis());
@@ -1355,6 +1386,244 @@ public class ModCommands {
         } catch (Exception e) {
             source.sendFailure(Component.literal("§c[LingLens] 收集服务器信息失败: " + e.getMessage()));
             LOGGER.error("[LingLens] list命令异常: ", e);
+            return 0;
+        }
+    }
+
+    // ==================== list 子命令处理方法(JSON单模块输出) ====================
+
+    /**
+     * 执行 /linglens list system —— 仅输出系统性能信息的 JSON 字符串。
+     * <p>包含 CPU 占用率、已用/已分配/最大内存。</p>
+     *
+     * @param ctx 命令上下文
+     * @return 1 成功,0 失败
+     */
+    private static int executeListSystem(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            MinecraftServer server = source.getServer();
+            SystemPerfResult sysPerf = PerformanceQuery.getSystemPerf(server);
+
+            JsonObject root = new JsonObject();
+            root.addProperty("cpuPercent", Math.round(sysPerf.cpuPercent() * 100.0) / 100.0);
+            root.addProperty("usedMemoryMB", Math.round(sysPerf.usedMemoryMB() * 100.0) / 100.0);
+            root.addProperty("allocatedMemoryMB", Math.round(sysPerf.allocatedMemoryMB() * 100.0) / 100.0);
+            root.addProperty("maxMemoryMB", Math.round(sysPerf.maxMemoryMB() * 100.0) / 100.0);
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            source.sendSuccess(() -> Component.literal(gson.toJson(root)), false);
+            LOGGER.debug("[LingLens] list system 命令执行完成");
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c[LingLens] list system 失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] executeListSystem 异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens list perf —— 仅输出游戏性能信息的 JSON 字符串。
+     * <p>包含 TPS、IdleTPS、MSPT、各维度 MSPT 详情。</p>
+     *
+     * @param ctx 命令上下文
+     * @return 1 成功,0 失败
+     */
+    private static int executeListPerf(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            MinecraftServer server = source.getServer();
+            PerformanceResult gamePerf = PerformanceQuery.getGamePerf(server);
+
+            JsonObject game = new JsonObject();
+            game.addProperty("tps", Math.round(gamePerf.tps() * 100.0) / 100.0);
+            game.addProperty("idleTps", Math.round(gamePerf.idletps() * 100.0) / 100.0);
+            game.addProperty("mspt", Math.round(gamePerf.mspt() * 100.0) / 100.0);
+            JsonObject dimMspt = new JsonObject();
+            if (gamePerf.dimensionMspt() != null) {
+                for (var entry : gamePerf.dimensionMspt().entrySet()) {
+                    dimMspt.addProperty(entry.getKey(), Math.round(entry.getValue() * 100.0) / 100.0);
+                }
+            }
+            game.add("dimensionMspt", dimMspt);
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            source.sendSuccess(() -> Component.literal(gson.toJson(game)), false);
+            LOGGER.debug("[LingLens] list perf 命令执行完成");
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c[LingLens] list perf 失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] executeListPerf 异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens list entity —— 仅输出实体统计信息的 JSON 字符串。
+     * <p>包含全局实体总数、各维度统计、分类统计和 Top 类型。</p>
+     *
+     * @param ctx 命令上下文
+     * @return 1 成功,0 失败
+     */
+    private static int executeListEntity(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            MinecraftServer server = source.getServer();
+            EntityStatsCache entityCache = EntityStatsCache.getInstance();
+            EntityQueryResult entityResult = entityCache.query(server);
+
+            JsonObject entity = new JsonObject();
+            entity.addProperty("globalTotal", entityResult.globalTotal);
+            entity.addProperty("fromCache", entityResult.fromCache);
+            entity.addProperty("cacheTime", entityResult.cacheTime);
+
+            JsonObject dimTotals = new JsonObject();
+            for (var entry : entityResult.dimensionTotals.entrySet()) {
+                dimTotals.addProperty(entry.getKey(), entry.getValue());
+            }
+            entity.add("dimensionTotals", dimTotals);
+
+            JsonObject dimCategories = new JsonObject();
+            for (var dimEntry : entityResult.dimCatCounts.entrySet()) {
+                JsonObject cats = new JsonObject();
+                for (var catEntry : dimEntry.getValue().entrySet()) {
+                    cats.addProperty(catEntry.getKey().name(), catEntry.getValue());
+                }
+                dimCategories.add(dimEntry.getKey(), cats);
+            }
+            entity.add("dimensionCategories", dimCategories);
+
+            JsonObject dimTypes = new JsonObject();
+            for (var dimEntry : entityResult.dimTypeCounts.entrySet()) {
+                JsonObject types = new JsonObject();
+                for (var typeEntry : dimEntry.getValue().entrySet()) {
+                    types.addProperty(typeEntry.getKey(), typeEntry.getValue());
+                }
+                dimTypes.add(dimEntry.getKey(), types);
+            }
+            entity.add("dimensionTopTypes", dimTypes);
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            source.sendSuccess(() -> Component.literal(gson.toJson(entity)), false);
+            LOGGER.debug("[LingLens] list entity 命令执行完成");
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c[LingLens] list entity 失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] executeListEntity 异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens list players —— 仅输出在线玩家信息的 JSON 字符串。
+     * <p>包含在线玩家数量、最大玩家数及每个玩家的详细信息。</p>
+     *
+     * @param ctx 命令上下文
+     * @return 1 成功,0 失败
+     */
+    private static int executeListPlayers(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            MinecraftServer server = source.getServer();
+            List<PlayerInfo> players = PlayerInfoQuery.collectAllOnlinePlayers(server);
+
+            JsonObject root = new JsonObject();
+            JsonArray playerArray = new JsonArray();
+            for (PlayerInfo p : players) {
+                JsonObject pObj = new JsonObject();
+                pObj.addProperty("name", p.name());
+                pObj.addProperty("uuid", p.uuid());
+                pObj.addProperty("dimension", p.dimension().toString());
+                pObj.addProperty("x", Math.round(p.position().x * 100.0) / 100.0);
+                pObj.addProperty("y", Math.round(p.position().y * 100.0) / 100.0);
+                pObj.addProperty("z", Math.round(p.position().z * 100.0) / 100.0);
+                pObj.addProperty("health", p.health());
+                pObj.addProperty("maxHealth", p.maxHealth());
+                pObj.addProperty("armor", p.armorValue());
+                pObj.addProperty("foodLevel", p.foodLevel());
+                pObj.addProperty("saturation", Math.round(p.saturation() * 100.0) / 100.0);
+                pObj.addProperty("experienceLevel", p.experienceLevel());
+                pObj.addProperty("experienceProgress", Math.round(p.experienceProgress() * 100.0) / 100.0);
+                pObj.addProperty("gameMode", p.gameMode());
+                pObj.addProperty("latency", p.latency());
+                pObj.addProperty("sessionTimeSeconds", p.sessionTimeSeconds());
+                pObj.addProperty("totalTimeSeconds", p.totalTimeSeconds());
+                playerArray.add(pObj);
+            }
+            root.add("players", playerArray);
+            root.addProperty("onlinePlayerCount", players.size());
+            root.addProperty("maxPlayers", server.getMaxPlayers());
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            source.sendSuccess(() -> Component.literal(gson.toJson(root)), false);
+            LOGGER.debug("[LingLens] list players 命令执行完成");
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c[LingLens] list players 失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] executeListPlayers 异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens list chunks —— 仅输出区块信息的 JSON 字符串。
+     * <p>包含总加载区块数和强制加载区块数。</p>
+     *
+     * @param ctx 命令上下文
+     * @return 1 成功,0 失败
+     */
+    private static int executeListChunks(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            MinecraftServer server = source.getServer();
+            ChunkQueryResult chunkResult = ChunkQueryResult.queryAll(server);
+
+            JsonObject chunk = new JsonObject();
+            chunk.addProperty("totalLoaded", chunkResult.getTotalLoaded());
+            chunk.addProperty("totalForced", chunkResult.getTotalForced());
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            source.sendSuccess(() -> Component.literal(gson.toJson(chunk)), false);
+            LOGGER.debug("[LingLens] list chunks 命令执行完成");
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c[LingLens] list chunks 失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] executeListChunks 异常: ", e);
+            return 0;
+        }
+    }
+
+    /**
+     * 执行 /linglens list network —— 仅输出网络流量统计信息的 JSON 字符串。
+     * <p>包含全局上传/下行统计、平均速度、以及实时速度。</p>
+     *
+     * @param ctx 命令上下文
+     * @return 1 成功,0 失败
+     */
+    private static int executeListNetwork(CommandContext<CommandSourceStack> ctx) {
+        CommandSourceStack source = ctx.getSource();
+        try {
+            NetworkTrafficStats netStats = NetworkTrafficStats.getInstance();
+
+            JsonObject network = new JsonObject();
+            // 全局累计数据
+            network.addProperty("uploadPackets", netStats.getGlobalUploadPackets());
+            network.addProperty("uploadBytes", netStats.getGlobalUploadBytes());
+            network.addProperty("downloadPackets", netStats.getGlobalDownloadPackets());
+            network.addProperty("downloadBytes", netStats.getGlobalDownloadBytes());
+            // 平均速度(字节/秒)
+            network.addProperty("averageUploadSpeedBps", Math.round(netStats.getGlobalAverageUploadSpeed() * 100.0) / 100.0);
+            network.addProperty("averageDownloadSpeedBps", Math.round(netStats.getGlobalAverageDownloadSpeed() * 100.0) / 100.0);
+            // 被追踪的玩家数
+            network.addProperty("trackedPlayerCount", netStats.getTrackedPlayerCount());
+
+            Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            source.sendSuccess(() -> Component.literal(gson.toJson(network)), false);
+            LOGGER.debug("[LingLens] list network 命令执行完成");
+            return 1;
+        } catch (Exception e) {
+            source.sendFailure(Component.literal("§c[LingLens] list network 失败: " + e.getMessage()));
+            LOGGER.error("[LingLens] executeListNetwork 异常: ", e);
             return 0;
         }
     }
@@ -1428,8 +1697,8 @@ public class ModCommands {
             MinecraftServer server = source.getServer();
 
             StringBuilder sb = new StringBuilder();
-            sb.append("§6=== [LingLens] 玩家流量排行 ===\n");
-            sb.append("§7排名 | 玩家名 | 上传 | 下行 | 总量\n");
+            // sb.append("§6=== [LingLens] 玩家流量排行 ===\n");
+            // sb.append("§7排名 | 玩家名 | 上传 | 下行 | 总量\n");
 
             // 按上传+下行总量从大到小排序
             final int[] rank = { 1 };

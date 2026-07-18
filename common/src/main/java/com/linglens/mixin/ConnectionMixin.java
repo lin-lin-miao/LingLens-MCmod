@@ -72,10 +72,12 @@ public abstract class ConnectionMixin {
     private void onSend(Packet<?> packet, PacketSendListener listener, CallbackInfo ci) {
         try {
             UUID playerUuid = extractPlayerUuid();
-            if (playerUuid == null) return;
+            if (playerUuid == null)
+                return;
 
             int bytes = estimatePacketSize(packet);
-            if (bytes <= 0) return;
+            if (bytes <= 0)
+                return;
 
             String packetType = getReadablePacketType(packet);
             NetworkTrafficStats.getInstance().recordUpload(playerUuid, bytes, packetType);
@@ -97,9 +99,9 @@ public abstract class ConnectionMixin {
      * <p>
      * 改用基于数据包类型的缓存估算策略：
      * <ol>
-     *   <li>首次遇到某种包类型时，尝试安全的序列化估算，成功则缓存结果</li>
-     *   <li>若估算失败（write 抛异常），则用默认值 64 字节并缓存</li>
-     *   <li>后续同类型包直接读取缓存，不再调用 write()</li>
+     * <li>首次遇到某种包类型时，尝试安全的序列化估算，成功则缓存结果</li>
+     * <li>若估算失败（write 抛异常），则用默认值 64 字节并缓存</li>
+     * <li>后续同类型包直接读取缓存，不再调用 write()</li>
      * </ol>
      * </p>
      *
@@ -111,14 +113,15 @@ public abstract class ConnectionMixin {
     private void onChannelRead0(ChannelHandlerContext ctx, Packet<?> packet, CallbackInfo ci) {
         try {
             UUID playerUuid = extractPlayerUuid();
-            if (playerUuid == null) return;
+            if (playerUuid == null)
+                return;
 
             String packetType = getReadablePacketType(packet);
-            int bytes = 1;
-            // int bytes = estimateDownloadPacketSize(packet, packetType);
-            if (bytes <= 0) return;
+            // int bytes = 1;//<<未能解决获取下载数据包大小
+            // // int bytes = estimateDownloadPacketSize(packet, packetType);
+            // if (bytes <= 0) return;
 
-            NetworkTrafficStats.getInstance().recordDownload(playerUuid, bytes, packetType);
+            NetworkTrafficStats.getInstance().recordDownload(playerUuid, 0, packetType);
         } catch (Exception e) {
             // 静默处理，避免影响正常收包
             LOGGER.debug("[LingLens] channelRead0 统计异常: {}", e.getMessage());
@@ -136,7 +139,8 @@ public abstract class ConnectionMixin {
      */
     @Unique
     private static String getReadablePacketType(Packet<?> packet) {
-        if (packet == null) return "null";
+        if (packet == null)
+            return "null";
         return packet.getClass().getSimpleName();
     }
 
@@ -173,7 +177,8 @@ public abstract class ConnectionMixin {
      */
     @Unique
     private int estimatePacketSize(Packet<?> packet) {
-        if (packet == null) return 0;
+        if (packet == null)
+            return 0;
         FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer());
         try {
             packet.write(buf);
