@@ -578,7 +578,7 @@ public class ModCommands {
         StringBuilder gamemsg = new StringBuilder();
         MessageFormat gameMf = new MessageFormat(
                 "§6=== [ 游戏性能 ] ===\n" +
-                        "§fTPS: §{0}{1} / §{2}{3}\n" +
+                        "§fTPS: §{0}{1} + §{2}{3}\n" +
                         "§fMSPT: §a{4} ms\n" +
                         "§f在线玩家: §a{5} / §b{6} §f: {7}\n");
         String tmp = gameMf.format(new Object[] {

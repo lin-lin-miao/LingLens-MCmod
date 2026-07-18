@@ -4,6 +4,7 @@
 
 #### 综合 Minecraft 服务器管理模组（Fabric / Forge / NeoForge）
 - 1.20.1 > 主要
+- 1.20.X < 1.20.6 (未完全测试)
 
 ---
 
